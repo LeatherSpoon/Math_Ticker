@@ -48,7 +48,13 @@ const state = {
 
 const statCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 20]));
 
-const player = buildCyborg();
+let player;
+try {
+  player = buildCyborg();
+} catch (error) {
+  console.warn('[player] Cyborg build failed; using placeholder mesh.', error);
+  player = buildPlayerPlaceholder();
+}
 player.position.set(0, 0, 0);
 scene.add(player);
 
@@ -88,6 +94,28 @@ function stylizedMesh(geometry, color) {
   return group;
 }
 
+let warnedLimbFallback = false;
+function makeLimbGeometry(radius, length) {
+  if (typeof THREE.CapsuleGeometry === 'function') {
+    return new THREE.CapsuleGeometry(radius, length, 6, 10);
+  }
+  if (!warnedLimbFallback) {
+    console.warn('[geometry] THREE.CapsuleGeometry unavailable; using CylinderGeometry fallback for limbs.');
+    warnedLimbFallback = true;
+  }
+  return new THREE.CylinderGeometry(radius, radius, length + radius * 2, 10);
+}
+
+function buildPlayerPlaceholder() {
+  const g = new THREE.Group();
+  const body = stylizedMesh(new THREE.BoxGeometry(1, 1.6, 1), 0x87b8df);
+  body.position.y = 1.2;
+  const head = stylizedMesh(new THREE.SphereGeometry(0.35, 12, 10), 0xf2dcc5);
+  head.position.y = 2.3;
+  g.add(body, head);
+  return g;
+}
+
 function buildCyborg() {
   const g = new THREE.Group();
 
@@ -99,14 +127,14 @@ function buildCyborg() {
   head.position.y = 2.6;
   g.add(head);
 
-  const legL = stylizedMesh(new THREE.CapsuleGeometry(0.22, 0.7, 6, 10), 0x4e6078);
-  const legR = stylizedMesh(new THREE.CapsuleGeometry(0.22, 0.7, 6, 10), 0x4e6078);
+  const legL = stylizedMesh(makeLimbGeometry(0.22, 0.7), 0x4e6078);
+  const legR = stylizedMesh(makeLimbGeometry(0.22, 0.7), 0x4e6078);
   legL.position.set(-0.25, 0.55, 0);
   legR.position.set(0.25, 0.55, 0);
   g.add(legL, legR);
 
-  const armL = stylizedMesh(new THREE.CapsuleGeometry(0.16, 0.72, 6, 8), 0x4e6078);
-  const armR = stylizedMesh(new THREE.CapsuleGeometry(0.16, 0.72, 6, 8), 0x4e6078);
+  const armL = stylizedMesh(makeLimbGeometry(0.16, 0.72), 0x4e6078);
+  const armR = stylizedMesh(makeLimbGeometry(0.16, 0.72), 0x4e6078);
   armL.rotation.z = 0.25;
   armR.rotation.z = -0.25;
   armL.position.set(-0.8, 1.55, 0);
