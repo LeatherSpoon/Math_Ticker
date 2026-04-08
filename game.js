@@ -48,9 +48,7 @@ const state = {
 
 const statCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 20]));
 
-const player = buildCyborg();
-player.position.set(0, 0, 0);
-scene.add(player);
+let player = null;
 
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(200, 200),
@@ -62,13 +60,6 @@ scene.add(ground);
 
 const nodes = [];
 const enemies = [];
-
-spawnNode('copper', -8, -5, 0xc17f43);
-spawnNode('timber', 7, 4, 0x5d8f3a);
-spawnNode('stone', 2, -7, 0x999999);
-spawnNode('fiber', -10, 6, 0xb6db82);
-spawnEnemy('Scrapper', 10, -2);
-spawnEnemy('Scrapper', -4, 8);
 
 function stylizedMesh(geometry, color) {
   const body = new THREE.Mesh(
@@ -154,6 +145,28 @@ const ui = {
   droneResourceButtons: document.getElementById('droneResourceButtons'),
 };
 
+function showBootError(message) {
+  let panel = document.getElementById('bootErrorPanel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'bootErrorPanel';
+    panel.style.position = 'fixed';
+    panel.style.top = '12px';
+    panel.style.left = '12px';
+    panel.style.zIndex = '9999';
+    panel.style.maxWidth = '360px';
+    panel.style.padding = '10px 12px';
+    panel.style.border = '1px solid rgba(255,120,120,0.95)';
+    panel.style.background = 'rgba(30, 10, 10, 0.92)';
+    panel.style.color = '#ffd9d9';
+    panel.style.font = '600 12px/1.35 system-ui, sans-serif';
+    panel.style.borderRadius = '8px';
+    panel.style.boxShadow = '0 4px 12px rgba(0,0,0,0.35)';
+    document.body.appendChild(panel);
+  }
+  panel.textContent = message;
+}
+
 function renderUI() {
   ui.pp.textContent = state.pp.toFixed(1);
   ui.ppRate.textContent = `(+${state.ppRate.toFixed(2)}/s)`;
@@ -205,6 +218,18 @@ function renderUI() {
   });
 }
 
+let uiHealthy = true;
+function safeRenderUI() {
+  if (!uiHealthy) return;
+  try {
+    renderUI();
+  } catch (error) {
+    uiHealthy = false;
+    showBootError('Game failed to initialize. Open console for details.');
+    console.error(error);
+  }
+}
+
 function applyEnvironmentTint() {
   const map = {
     'Landing Site': [0x7cad5d, 0x6b9ecf],
@@ -217,41 +242,47 @@ function applyEnvironmentTint() {
   scene.background.setHex(bg);
 }
 
-document.getElementById('upgradeDrone').addEventListener('click', () => {
-  const cost = state.droneLevel * 250;
-  if (state.pp >= cost) {
-    state.pp -= cost;
-    state.droneLevel += 1;
-    renderUI();
-  }
-});
+function wireUI() {
+  if (wireUI.didInit) return;
+  wireUI.didInit = true;
 
-['copper', 'timber', 'stone', 'fiber', 'resin', 'quartz'].forEach((r) => {
-  const b = document.createElement('button');
-  b.textContent = r;
-  b.addEventListener('click', () => {
-    state.droneTarget = r;
-    renderUI();
+  document.getElementById('upgradeDrone').addEventListener('click', () => {
+    const cost = state.droneLevel * 250;
+    if (state.pp >= cost) {
+      state.pp -= cost;
+      state.droneLevel += 1;
+      renderUI();
+    }
   });
-  ui.droneResourceButtons.appendChild(b);
-});
 
-document.querySelectorAll('[data-craft]').forEach((button) => {
-  button.addEventListener('click', () => {
-    const item = button.getAttribute('data-craft');
-    const recipes = {
-      ration: { copper: 1, fiber: 1 },
-      firstAid: { copper: 2, resin: 1 },
-    };
-    const recipe = recipes[item];
-    if (!recipe) return;
-    const canCraft = Object.entries(recipe).every(([key, amt]) => state.resources[key] >= amt);
-    if (!canCraft) return;
-    Object.entries(recipe).forEach(([key, amt]) => { state.resources[key] -= amt; });
-    state.inventory[item] += 1;
-    renderUI();
+  ['copper', 'timber', 'stone', 'fiber', 'resin', 'quartz'].forEach((r) => {
+    const b = document.createElement('button');
+    b.textContent = r;
+    b.addEventListener('click', () => {
+      state.droneTarget = r;
+      renderUI();
+    });
+    ui.droneResourceButtons.appendChild(b);
   });
-});
+
+  document.querySelectorAll('[data-craft]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const item = button.getAttribute('data-craft');
+      const recipes = {
+        ration: { copper: 1, fiber: 1 },
+        firstAid: { copper: 2, resin: 1 },
+      };
+      const recipe = recipes[item];
+      if (!recipe) return;
+      const canCraft = Object.entries(recipe).every(([key, amt]) => state.resources[key] >= amt);
+      if (!canCraft) return;
+      Object.entries(recipe).forEach(([key, amt]) => { state.resources[key] -= amt; });
+      state.inventory[item] += 1;
+      renderUI();
+    });
+  });
+}
+wireUI.didInit = false;
 
 let combat = null;
 const combatModal = document.getElementById('combatModal');
@@ -414,6 +445,13 @@ function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
 
+  if (!player) {
+    state.pp += state.ppRate * dt;
+    safeRenderUI();
+    if (state.running) requestAnimationFrame(tick);
+    return;
+  }
+
   if (!state.inCombat) {
     const move = new THREE.Vector3();
     if (keys.has('w') || keys.has('arrowup')) move.z -= 1;
@@ -479,11 +517,39 @@ function tick(now) {
   camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z + 18, 0.06);
   camera.lookAt(player.position.x, 0, player.position.z);
 
-  renderUI();
+  safeRenderUI();
   renderer.render(scene, camera);
   if (state.running) requestAnimationFrame(tick);
 }
 
-renderUI();
-applyEnvironmentTint();
-requestAnimationFrame(tick);
+try {
+  player = buildCyborg();
+  player.position.set(0, 0, 0);
+  scene.add(player);
+
+  spawnNode('copper', -8, -5, 0xc17f43);
+  spawnNode('timber', 7, 4, 0x5d8f3a);
+  spawnNode('stone', 2, -7, 0x999999);
+  spawnNode('fiber', -10, 6, 0xb6db82);
+  spawnEnemy('Scrapper', 10, -2);
+  spawnEnemy('Scrapper', -4, 8);
+
+  wireUI();
+  safeRenderUI();
+  applyEnvironmentTint();
+  requestAnimationFrame(tick);
+} catch (error) {
+  showBootError('Game failed to initialize. Open console for details.');
+  console.error(error);
+  try {
+    wireUI();
+  } catch (wireError) {
+    console.error(wireError);
+  }
+  try {
+    safeRenderUI();
+    requestAnimationFrame(tick);
+  } catch (fallbackError) {
+    console.error(fallbackError);
+  }
+}
