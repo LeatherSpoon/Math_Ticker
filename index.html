@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Math Ticker - Frontier Loop</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.com/three@0.161.0/build/three.min.js"></script>
+  </head>
+  <body>
+    <main class="layout">
+      <section class="viewport-wrap">
+        <canvas id="gameCanvas" aria-label="Game viewport"></canvas>
+        <div class="hud top-left">
+          <h1>Frontier Loop</h1>
+          <p><strong>PP</strong>: <span id="pp">0</span> <span id="ppRate">(+1.0/s)</span></p>
+          <p><strong>Steps</strong>: <span id="steps">0</span></p>
+          <p><strong>Resource</strong>: <span id="resourceSummary">copper 0, timber 0, stone 0</span></p>
+        </div>
+
+        <div class="hud top-right">
+          <h2>Environment</h2>
+          <p id="environmentLabel">Landing Site</p>
+          <div id="environmentButtons"></div>
+        </div>
+
+        <div class="hud bottom-left">
+          <h2>Stats (Spend PP)</h2>
+          <div id="statList"></div>
+        </div>
+
+        <div class="hud bottom-right">
+          <h2>Drones & Craft</h2>
+          <p>Drone Level: <span id="droneLevel">1</span></p>
+          <button id="upgradeDrone">Upgrade Drone (250 PP)</button>
+          <p>Assigned: <span id="droneTarget">copper</span></p>
+          <div class="inline-buttons" id="droneResourceButtons"></div>
+          <hr />
+          <p><strong>Consumables</strong></p>
+          <button data-craft="ration">Craft Ration (copper 1, fiber 1)</button>
+          <button data-craft="firstAid">Craft First Aid (copper 2, resin 1)</button>
+          <p>Inventory: <span id="inventory">ration 0, first aid 0</span></p>
+        </div>
+
+        <div class="hud controls">
+          Move: WASD or Arrow Keys · Gather by touching nodes · Touch enemy to trigger combat
+        </div>
+      </section>
+    </main>
+
+    <section id="combatModal" class="combat hidden" aria-modal="true" role="dialog">
+      <div class="combat-frame">
+        <div class="combat-top">
+          <div class="combatant player">
+            <div class="sprite">🧍</div>
+            <div class="bar"><span id="playerHpBar"></span></div>
+            <small id="playerHpText">HP: 100/100</small>
+          </div>
+          <div class="combatant enemy">
+            <div class="sprite">🤖</div>
+            <div class="bar"><span id="enemyHpBar"></span></div>
+            <small id="enemyHpText">HP: 60/60</small>
+          </div>
+        </div>
+
+        <div class="focus-ring-wrap">
+          <svg viewBox="0 0 120 120" class="focus-ring">
+            <circle cx="60" cy="60" r="50" class="ring-bg"></circle>
+            <circle cx="60" cy="60" r="50" class="ring-fg" id="focusRing"></circle>
+          </svg>
+          <p>FP: <span id="focusText">0/100</span></p>
+        </div>
+
+        <div class="combat-log" id="combatLog"></div>
+
+        <div class="combat-bottom">
+          <button data-action="fight">Fight</button>
+          <button data-action="items">Items</button>
+          <button data-action="run">Run</button>
+          <button data-action="skills">Skills</button>
+        </div>
+        <div id="subMenu" class="submenu"></div>
+      </div>
+    </section>
+
+    <script src="game.js"></script>
+  </body>
+</html>
