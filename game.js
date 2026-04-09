@@ -766,6 +766,33 @@ function dealDamage(amount, label = 'Fight') {
 let droneTimer = 0;
 let rescueSequence = null;
 let last = performance.now();
+let droneFlightOffset = null;
+let droneFlightTarget = null;
+let droneFlightBobScratch = null;
+
+function updateDroneFlight(dt) {
+  if (degradedMode || !game3DAvailable || !window.THREE) return;
+  if (!drone || !player) return;
+  if (!droneFlightOffset || !droneFlightTarget || !droneFlightBobScratch) {
+    droneFlightOffset = new THREE.Vector3(1.8, 2.3, -1.5);
+    droneFlightTarget = new THREE.Vector3();
+    droneFlightBobScratch = new THREE.Vector3();
+  }
+
+  const orbitSpeed = 1.35;
+  const hoverRate = 2.6;
+  const followSmoothing = Math.min(1, dt * 5.5);
+
+  drone.userData.orbitAngle = (drone.userData.orbitAngle || 0) + orbitSpeed * dt;
+  const orbitAngle = drone.userData.orbitAngle;
+
+  droneFlightBobScratch.copy(droneFlightOffset);
+  droneFlightBobScratch.applyAxisAngle(THREE.Object3D.DEFAULT_UP, orbitAngle);
+  droneFlightBobScratch.y += Math.sin(orbitAngle * hoverRate) * 0.22;
+
+  droneFlightTarget.copy(player.position).add(droneFlightBobScratch);
+  drone.position.lerp(droneFlightTarget, followSmoothing);
+}
 
 function updateStepPpRate(dt, stepPpGain) {
   const stepRateTarget = dt > 0 ? stepPpGain / dt : 0;
