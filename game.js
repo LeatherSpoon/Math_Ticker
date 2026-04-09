@@ -113,8 +113,16 @@ function buildCyborg() {
 
 function spawnNode(type, x, z, color) {
   const node = stylizedMesh(new THREE.DodecahedronGeometry(0.8, 0), color);
-  node.position.set(x, 0.8, z);
-  node.userData = { type };
+  const origin = new THREE.Vector3(x, 0.8, z);
+  node.position.copy(origin);
+  node.userData = {
+    type,
+    origin,
+    active: true,
+    respawnTimer: 0,
+    respawnDelay: 5,
+    pulsePhase: Math.random() * Math.PI * 2,
+  };
   scene.add(node);
   nodes.push(node);
 }
@@ -532,14 +540,44 @@ function tick(now) {
     }
 
     nodes.forEach((node) => {
+      const descriptor = node.userData;
+      const pulse = 1 + Math.sin(now * 0.0017 + descriptor.pulsePhase) * 0.025;
+      node.scale.setScalar(pulse);
       node.rotation.y += 0.9 * dt;
+
+      if (!descriptor.active) {
+        descriptor.respawnTimer -= dt;
+        const fadeIn = descriptor.respawnDelay > 0
+          ? THREE.MathUtils.clamp(1 - (descriptor.respawnTimer / descriptor.respawnDelay), 0, 1)
+          : 1;
+        node.visible = fadeIn > 0;
+        node.children.forEach((mesh) => {
+          if (mesh.material) {
+            mesh.material.transparent = true;
+            mesh.material.opacity = fadeIn;
+          }
+        });
+
+        if (descriptor.respawnTimer <= 0) {
+          descriptor.active = true;
+          descriptor.respawnTimer = 0;
+          node.visible = true;
+          node.position.copy(descriptor.origin);
+          node.children.forEach((mesh) => {
+            if (mesh.material) mesh.material.opacity = 1;
+          });
+        }
+        return;
+      }
+
       if (node.position.distanceTo(player.position) < 1.4) {
         const type = node.userData.type;
         const gain = 1 + Math.floor(state.stats.perception / 4);
         state.resources[type] += gain;
         state.pp += 3;
-        node.position.x = (Math.random() - 0.5) * 24;
-        node.position.z = (Math.random() - 0.5) * 16;
+        descriptor.active = false;
+        descriptor.respawnTimer = descriptor.respawnDelay;
+        node.visible = false;
       }
     });
 
