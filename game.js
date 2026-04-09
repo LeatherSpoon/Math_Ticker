@@ -39,9 +39,41 @@ const statCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 20]
 
 let player = null;
 let ground = null;
+let keyLight = null;
+let fillLight = null;
+let rimLight = null;
 
 const nodes = [];
 const enemies = [];
+const environmentGroups = {};
+let environmentLightRig = null;
+
+const ENVIRONMENT_STYLES = {
+  'Landing Site': {
+    groundColor: 0x7cad5d,
+    background: 0x6b9ecf,
+    fog: [0x84b4df, 0.01],
+    light: { key: [0xfff6d9, 1.08], fill: [0xd9f2ff, 0.6], rim: [0xc6ecff, 0.3] },
+  },
+  Mine: {
+    groundColor: 0x5c5b54,
+    background: 0x1f242d,
+    fog: [0x20262f, 0.055],
+    light: { key: [0xffd39a, 0.7], fill: [0x8ec0ff, 0.25], rim: [0xffa15a, 0.5] },
+  },
+  'Verdant Maw': {
+    groundColor: 0x3a7f46,
+    background: 0x5a8f73,
+    fog: [0x446f57, 0.02],
+    light: { key: [0xe4ffce, 0.95], fill: [0x9adca6, 0.75], rim: [0x8bf5ab, 0.32] },
+  },
+  'Lagoon Coast': {
+    groundColor: 0xb4c788,
+    background: 0x7ad1df,
+    fog: [0x88dbe3, 0.015],
+    light: { key: [0xfff3cf, 1], fill: [0xb9efff, 0.68], rim: [0x6de6ff, 0.45] },
+  },
+};
 
 function stylizedMesh(geometry, color) {
   const body = new THREE.Mesh(
@@ -128,6 +160,154 @@ function spawnEnemy(name, x, z) {
   e.userData = { name, hp: 60, maxHp: 60, attack: 4 };
   scene.add(e);
   enemies.push(e);
+}
+
+function randomRange(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function makeTree() {
+  const tree = new THREE.Group();
+  const trunk = stylizedMesh(new THREE.CylinderGeometry(0.16, 0.24, 1.7, 6), 0x70503a);
+  trunk.position.y = 0.85;
+  const canopy = stylizedMesh(new THREE.ConeGeometry(0.95, 1.5, 7), 0x3f8342);
+  canopy.position.y = 2;
+  tree.add(trunk, canopy);
+  return tree;
+}
+
+function makeRock(scale = 1) {
+  const rock = stylizedMesh(new THREE.DodecahedronGeometry(0.45 * scale, 0), 0x767676);
+  rock.rotation.set(randomRange(-0.25, 0.25), randomRange(0, Math.PI), randomRange(-0.2, 0.2));
+  return rock;
+}
+
+function makeMeadowClutter() {
+  const clutter = new THREE.Group();
+  const blades = stylizedMesh(new THREE.ConeGeometry(0.15, 0.5, 5), 0x6aa94f);
+  blades.position.y = 0.22;
+  const flower = stylizedMesh(new THREE.SphereGeometry(0.07, 8, 6), 0xf1df93);
+  flower.position.y = 0.45;
+  clutter.add(blades, flower);
+  clutter.rotation.y = randomRange(0, Math.PI * 2);
+  return clutter;
+}
+
+function buildLandingSiteProps() {
+  const group = new THREE.Group();
+  group.name = 'LandingSiteProps';
+
+  const perimeterRadius = 52;
+  for (let i = 0; i < 36; i += 1) {
+    const tree = makeTree();
+    const angle = (i / 36) * Math.PI * 2;
+    const radiusJitter = randomRange(-8, 7);
+    tree.position.set(
+      Math.cos(angle) * (perimeterRadius + radiusJitter),
+      0,
+      Math.sin(angle) * (perimeterRadius + radiusJitter)
+    );
+    tree.scale.setScalar(randomRange(0.9, 1.35));
+    group.add(tree);
+  }
+
+  for (let i = 0; i < 80; i += 1) {
+    const clutter = makeMeadowClutter();
+    clutter.position.set(randomRange(-30, 30), 0, randomRange(-24, 24));
+    clutter.scale.setScalar(randomRange(0.7, 1.2));
+    group.add(clutter);
+  }
+
+  const ridge = new THREE.Group();
+  for (let i = 0; i < 14; i += 1) {
+    const peak = stylizedMesh(
+      new THREE.ConeGeometry(randomRange(2.5, 4.2), randomRange(6, 10), 5),
+      0x5f6e77
+    );
+    peak.position.set(-58 + i * 9.5, randomRange(2.3, 3.4), -44 - randomRange(0, 6));
+    ridge.add(peak);
+  }
+  group.add(ridge);
+
+  const cave = new THREE.Group();
+  const arch = stylizedMesh(new THREE.TorusGeometry(2.4, 0.65, 8, 16, Math.PI), 0x4f4b45);
+  arch.rotation.z = Math.PI;
+  arch.position.set(-18, 2.2, -20);
+  const cavity = stylizedMesh(new THREE.CylinderGeometry(1.5, 1.5, 2.2, 10, 1, true), 0x242424);
+  cavity.rotation.x = Math.PI / 2;
+  cavity.position.set(-18, 1.05, -18.7);
+  cave.add(arch, cavity);
+  group.add(cave);
+  return group;
+}
+
+function buildMineProps() {
+  const group = new THREE.Group();
+  group.name = 'MineProps';
+
+  const tunnelWall = stylizedMesh(new THREE.BoxGeometry(80, 12, 4), 0x3b3936);
+  tunnelWall.position.set(0, 5, -22);
+  group.add(tunnelWall);
+
+  for (let i = 0; i < 22; i += 1) {
+    const support = new THREE.Group();
+    const beamLeft = stylizedMesh(new THREE.BoxGeometry(0.5, 3.3, 0.5), 0x6a503a);
+    const beamRight = stylizedMesh(new THREE.BoxGeometry(0.5, 3.3, 0.5), 0x6a503a);
+    const beamTop = stylizedMesh(new THREE.BoxGeometry(3.3, 0.4, 0.5), 0x7b5d40);
+    beamLeft.position.set(-1.4, 1.7, 0);
+    beamRight.position.set(1.4, 1.7, 0);
+    beamTop.position.set(0, 3.2, 0);
+    support.add(beamLeft, beamRight, beamTop);
+    support.position.set(-32 + i * 3, 0, randomRange(-7, 7));
+    support.rotation.y = randomRange(-0.08, 0.08);
+    group.add(support);
+  }
+
+  for (let i = 0; i < 30; i += 1) {
+    const debris = makeRock(randomRange(0.75, 1.35));
+    debris.position.set(randomRange(-34, 34), 0.25, randomRange(-18, 18));
+    group.add(debris);
+  }
+
+  const veinCluster = new THREE.Group();
+  for (let i = 0; i < 10; i += 1) {
+    const crystal = stylizedMesh(new THREE.ConeGeometry(0.25, randomRange(0.7, 1.4), 6), 0x8ec0ff);
+    crystal.position.set(randomRange(-8, 8), randomRange(0.3, 1.1), -14 + randomRange(-2, 2));
+    crystal.rotation.y = randomRange(0, Math.PI * 2);
+    veinCluster.add(crystal);
+  }
+  group.add(veinCluster);
+
+  const caveMouth = stylizedMesh(new THREE.TorusGeometry(4, 1.3, 8, 18, Math.PI), 0x49443d);
+  caveMouth.rotation.z = Math.PI;
+  caveMouth.position.set(0, 3, 23);
+  group.add(caveMouth);
+
+  return group;
+}
+
+function buildEnvironmentProps(environmentName) {
+  switch (environmentName) {
+    case 'Mine':
+      return buildMineProps();
+    case 'Landing Site':
+      return buildLandingSiteProps();
+    default:
+      return new THREE.Group();
+  }
+}
+
+function setActiveEnvironmentGroup(environmentName) {
+  Object.entries(environmentGroups).forEach(([name, group]) => {
+    group.visible = name === environmentName;
+  });
+
+  if (!environmentGroups[environmentName]) {
+    const newGroup = buildEnvironmentProps(environmentName);
+    environmentGroups[environmentName] = newGroup;
+    scene.add(newGroup);
+  }
+  environmentGroups[environmentName].visible = true;
 }
 
 const keys = new Set();
@@ -250,10 +430,14 @@ function initGame() {
   camera.position.set(18, 20, 18);
   camera.lookAt(0, 0, 0);
 
-  const light = new THREE.DirectionalLight(0xffffff, 1.1);
-  light.position.set(10, 20, 6);
-  scene.add(light);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
+  keyLight.position.set(10, 20, 6);
+  fillLight = new THREE.HemisphereLight(0xc7ecff, 0x2c3a3a, 0.55);
+  rimLight = new THREE.DirectionalLight(0x93d2ff, 0.3);
+  rimLight.position.set(-12, 8, -20);
+  environmentLightRig = new THREE.Group();
+  environmentLightRig.add(keyLight, fillLight, rimLight);
+  scene.add(environmentLightRig);
 
   ground = new THREE.Mesh(
     new THREE.PlaneGeometry(200, 200),
@@ -273,22 +457,25 @@ function initGame() {
   spawnNode('fiber', -10, 6, 0xb6db82);
   spawnEnemy('Scrapper', 10, -2);
   spawnEnemy('Scrapper', -4, 8);
+  setActiveEnvironmentGroup(state.env);
 
   game3DAvailable = true;
   degradedMode = false;
 }
 
 function applyEnvironmentTint() {
-  if (!ground || !scene) return;
-  const map = {
-    'Landing Site': [0x7cad5d, 0x6b9ecf],
-    Mine: [0x656565, 0x505e69],
-    'Verdant Maw': [0x3a7f46, 0x5a8f73],
-    'Lagoon Coast': [0xb4c788, 0x7ad1df],
-  };
-  const [groundColor, bg] = map[state.env] || map['Landing Site'];
-  ground.material.color.setHex(groundColor);
-  scene.background.setHex(bg);
+  if (!ground || !scene || !keyLight || !fillLight || !rimLight) return;
+  const style = ENVIRONMENT_STYLES[state.env] || ENVIRONMENT_STYLES['Landing Site'];
+  ground.material.color.setHex(style.groundColor);
+  scene.background.setHex(style.background);
+  scene.fog = new THREE.FogExp2(style.fog[0], style.fog[1]);
+  keyLight.color.setHex(style.light.key[0]);
+  keyLight.intensity = style.light.key[1];
+  fillLight.color.setHex(style.light.fill[0]);
+  fillLight.intensity = style.light.fill[1];
+  rimLight.color.setHex(style.light.rim[0]);
+  rimLight.intensity = style.light.rim[1];
+  setActiveEnvironmentGroup(state.env);
 }
 
 function wireUI() {
