@@ -5,7 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Math Ticker - Frontier Loop</title>
     <link rel="stylesheet" href="styles.css" />
-    <script src="https://unpkg.com/three@0.161.0/build/three.min.js"></script>
+    <script src="vendor/three.min.js"></script>
+    <script>
+      if (!window.THREE) {
+        const fallback = document.createElement('script');
+        fallback.src = 'https://unpkg.com/three@0.161.0/build/three.min.js';
+        fallback.crossOrigin = 'anonymous';
+        document.head.appendChild(fallback);
+      }
+    </script>
   </head>
   <body>
     <main class="layout">
