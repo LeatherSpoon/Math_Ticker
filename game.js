@@ -1,3 +1,25 @@
+if (!window.THREE) {
+  let panel = document.getElementById('bootErrorPanel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'bootErrorPanel';
+    panel.style.position = 'fixed';
+    panel.style.top = '12px';
+    panel.style.left = '12px';
+    panel.style.zIndex = '9999';
+    panel.style.maxWidth = '360px';
+    panel.style.padding = '10px 12px';
+    panel.style.border = '1px solid rgba(255,120,120,0.95)';
+    panel.style.background = 'rgba(30, 10, 10, 0.92)';
+    panel.style.color = '#ffd9d9';
+    panel.style.font = '600 12px/1.35 system-ui, sans-serif';
+    panel.style.borderRadius = '8px';
+    panel.style.boxShadow = '0 4px 12px rgba(0,0,0,0.35)';
+    document.body.appendChild(panel);
+  }
+  panel.textContent = 'Failed to start: Three.js is not available. Ensure vendor/three.min.js is bundled or CDN fallback is reachable.';
+  console.error('[boot] Missing dependency: window.THREE');
+} else {
 const canvas = document.getElementById('gameCanvas');
 let renderer = null;
 let scene = null;

@@ -6,6 +6,22 @@ A browser-based top-down orthographic sci-fi progression game prototype inspired
 
 Open `index.html` in a browser.
 
+## Asset dependency policy (offline-safe core gameplay)
+
+- Core gameplay should start from **local assets only**.
+- Three.js is loaded from `vendor/three.min.js` as the primary dependency path.
+- A CDN script is kept as an **optional fallback only** if the local bundle is missing.
+- For deterministic deployments, ship a pinned `vendor/three.min.js` artifact with your release so no external network is needed for startup.
+- `game.js` has a startup guard: if `window.THREE` is missing, gameplay initialization halts and an explicit boot error panel is shown.
+
+## Offline verification checklist
+
+When testing in browser offline mode (DevTools Network = Offline), verify:
+
+1. Scene renders in the canvas.
+2. The player mesh appears at spawn.
+3. PP increments over time in the HUD.
+
 ## Current systems
 
 - Orthographic 3D overworld with stylized outlined meshes.
