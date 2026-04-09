@@ -9,8 +9,9 @@ const state = {
   running: true,
   pp: 0,
   ppRate: 1,
+  stepPpRate: 0,
   steps: 0,
-  stepBonus: 0.03,
+  stepBonus: 0.2,
   env: 'Landing Site',
   droneLevel: 1,
   droneTarget: 'copper',
@@ -140,7 +141,9 @@ window.addEventListener('resize', () => {
 
 const ui = {
   pp: document.getElementById('pp'),
-  ppRate: document.getElementById('ppRate'),
+  passivePpRate: document.getElementById('passivePpRate'),
+  stepPpRate: document.getElementById('stepPpRate'),
+  totalPpRate: document.getElementById('totalPpRate'),
   steps: document.getElementById('steps'),
   resourceSummary: document.getElementById('resourceSummary'),
   statList: document.getElementById('statList'),
@@ -176,7 +179,9 @@ function showBootError(message) {
 
 function renderUI() {
   ui.pp.textContent = state.pp.toFixed(1);
-  ui.ppRate.textContent = `(+${state.ppRate.toFixed(2)}/s)`;
+  ui.passivePpRate.textContent = `+${state.ppRate.toFixed(2)}/s`;
+  ui.stepPpRate.textContent = `+${state.stepPpRate.toFixed(2)}/s`;
+  ui.totalPpRate.textContent = `+${(state.ppRate + state.stepPpRate).toFixed(2)}/s`;
   ui.steps.textContent = Math.floor(state.steps);
   ui.resourceSummary.textContent = `copper ${state.resources.copper}, timber ${state.resources.timber}, stone ${state.resources.stone}`;
   ui.droneLevel.textContent = String(state.droneLevel);
@@ -490,18 +495,27 @@ function dealDamage(amount, label = 'Fight') {
 let droneTimer = 0;
 let last = performance.now();
 
+function updateStepPpRate(dt, stepPpGain) {
+  const stepRateTarget = dt > 0 ? stepPpGain / dt : 0;
+  const stepRateSmoothing = Math.min(1, dt * 7);
+  state.stepPpRate += (stepRateTarget - state.stepPpRate) * stepRateSmoothing;
+}
+
 function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   state.pp += state.ppRate * dt;
+  let stepPpGain = 0;
 
   if (degradedMode) {
+    updateStepPpRate(dt, stepPpGain);
     safeRenderUI();
     if (state.running) requestAnimationFrame(tick);
     return;
   }
 
   if (!game3DAvailable || !player || !scene || !camera || !renderer || !ground) {
+    updateStepPpRate(dt, stepPpGain);
     safeRenderUI();
     if (state.running) requestAnimationFrame(tick);
     return;
@@ -518,7 +532,8 @@ function tick(now) {
       move.normalize().multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
       player.position.add(move);
       state.steps += move.length() * 6;
-      state.pp += move.length() * state.stepBonus;
+      stepPpGain = move.length() * state.stepBonus;
+      state.pp += stepPpGain;
     }
 
     nodes.forEach((node) => {
@@ -565,6 +580,8 @@ function tick(now) {
     }
     updateCombatBars();
   }
+
+  updateStepPpRate(dt, stepPpGain);
 
   camera.position.x = THREE.MathUtils.lerp(camera.position.x, player.position.x + 18, 0.06);
   camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z + 18, 0.06);
