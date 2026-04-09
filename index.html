@@ -7,12 +7,37 @@
     <link rel="stylesheet" href="styles.css" />
     <script src="vendor/three.min.js"></script>
     <script>
-      if (!window.THREE) {
-        const fallback = document.createElement('script');
-        fallback.src = 'https://unpkg.com/three@0.161.0/build/three.min.js';
-        fallback.crossOrigin = 'anonymous';
-        document.head.appendChild(fallback);
-      }
+      window.__threeLoad = (() => {
+        if (window.THREE) {
+          return {
+            ready: Promise.resolve('primary'),
+            source: 'primary',
+          };
+        }
+
+        let source = 'fallback-pending';
+        const ready = new Promise((resolve, reject) => {
+          const fallback = document.createElement('script');
+          fallback.src = 'https://unpkg.com/three@0.161.0/build/three.min.js';
+          fallback.crossOrigin = 'anonymous';
+          fallback.onload = () => {
+            source = 'fallback';
+            resolve('fallback');
+          };
+          fallback.onerror = () => {
+            source = 'failed';
+            reject(new Error('Fallback Three.js script failed to load.'));
+          };
+          document.head.appendChild(fallback);
+        });
+
+        return {
+          ready,
+          get source() {
+            return source;
+          },
+        };
+      })();
     </script>
   </head>
   <body>

@@ -575,13 +575,18 @@ function tick(now) {
   if (state.running) requestAnimationFrame(tick);
 }
 
-function boot() {
+function boot(preflightError = null) {
   wireUI();
 
   if (!window.THREE) {
     degradedMode = true;
     game3DAvailable = false;
-    showBootError('3D engine failed to load.');
+    if (preflightError) {
+      console.error(preflightError);
+      showBootError(`3D engine failed to load: ${preflightError?.message || 'unknown error'}`);
+    } else {
+      showBootError('3D engine failed to load.');
+    }
     safeRenderUI();
     requestAnimationFrame(tick);
     return;
@@ -602,4 +607,20 @@ function boot() {
   }
 }
 
-boot();
+function bootWhenThreeReady() {
+  const threeLoad = window.__threeLoad;
+  if (!threeLoad || !threeLoad.ready || typeof threeLoad.ready.then !== 'function') {
+    boot();
+    return;
+  }
+
+  threeLoad.ready
+    .then(() => {
+      boot();
+    })
+    .catch((error) => {
+      boot(error);
+    });
+}
+
+bootWhenThreeReady();
