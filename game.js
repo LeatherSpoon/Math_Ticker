@@ -246,8 +246,9 @@ function initGame() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x6b9ecf);
 
-  camera = new THREE.OrthographicCamera(-22, 22, 14, -14, 0.1, 100);
-  camera.position.set(18, 20, 18);
+  camera = new THREE.OrthographicCamera(-22, 22, 14, -14, 0.1, 120);
+  camera.position.set(0, 42, 0);
+  camera.up.set(0, 0, -1);
   camera.lookAt(0, 0, 0);
 
   const light = new THREE.DirectionalLight(0xffffff, 1.1);
@@ -515,10 +516,19 @@ function tick(now) {
     if (keys.has('d') || keys.has('arrowright')) move.x += 1;
 
     if (move.lengthSq() > 0) {
-      move.normalize().multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
-      player.position.add(move);
-      state.steps += move.length() * 6;
-      state.pp += move.length() * state.stepBonus;
+      const moveDir = move.normalize();
+      const heading = Math.atan2(moveDir.x, moveDir.z);
+      const turnSmoothing = 0.18;
+      const angleDelta = Math.atan2(
+        Math.sin(heading - player.rotation.y),
+        Math.cos(heading - player.rotation.y)
+      );
+      player.rotation.y += angleDelta * turnSmoothing;
+
+      moveDir.multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
+      player.position.add(moveDir);
+      state.steps += moveDir.length() * 6;
+      state.pp += moveDir.length() * state.stepBonus;
     }
 
     nodes.forEach((node) => {
@@ -566,8 +576,8 @@ function tick(now) {
     updateCombatBars();
   }
 
-  camera.position.x = THREE.MathUtils.lerp(camera.position.x, player.position.x + 18, 0.06);
-  camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z + 18, 0.06);
+  camera.position.x = THREE.MathUtils.lerp(camera.position.x, player.position.x, 0.12);
+  camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z, 0.12);
   camera.lookAt(player.position.x, 0, player.position.z);
 
   safeRenderUI();
