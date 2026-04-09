@@ -51,6 +51,9 @@ const offloadStatCosts = Object.fromEntries(Object.keys(state.stats).map((k) => 
 let player = null;
 let drone = null;
 let ground = null;
+let keyLight = null;
+let fillLight = null;
+let rimLight = null;
 
 const nodes = [];
 const enemies = [];
@@ -451,10 +454,14 @@ function initGame() {
   camera.up.set(0, 0, -1);
   camera.lookAt(0, 0, 0);
 
-  const light = new THREE.DirectionalLight(0xffffff, 1.1);
-  light.position.set(10, 20, 6);
-  scene.add(light);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
+  keyLight.position.set(10, 20, 6);
+  fillLight = new THREE.HemisphereLight(0xc7ecff, 0x2c3a3a, 0.55);
+  rimLight = new THREE.DirectionalLight(0x93d2ff, 0.3);
+  rimLight.position.set(-12, 8, -20);
+  environmentLightRig = new THREE.Group();
+  environmentLightRig.add(keyLight, fillLight, rimLight);
+  scene.add(environmentLightRig);
 
   ground = new THREE.Mesh(
     new THREE.PlaneGeometry(200, 200),
@@ -478,6 +485,7 @@ function initGame() {
   spawnNode('fiber', -10, 6, 0xb6db82);
   spawnEnemy('Scrapper', 10, -2);
   spawnEnemy('Scrapper', -4, 8);
+  setActiveEnvironmentGroup(state.env);
 
   const spawnAnchor = new THREE.Vector3(0, 0.06, 0);
   const cavePosition = new THREE.Vector3(22, 0.06, -11);
