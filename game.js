@@ -15,6 +15,7 @@ const state = {
   running: true,
   pp: 0,
   ppRate: 1,
+  stepPpRate: 0,
   offloadEnabled: false,
   offloadRatio: 1,
   offloadExp: 0,
@@ -768,6 +769,7 @@ let rescueSequence = null;
 let last = performance.now();
 
 function updateStepPpRate(dt, stepPpGain) {
+  if (!Number.isFinite(state.stepPpRate)) state.stepPpRate = 0;
   const stepRateTarget = dt > 0 ? stepPpGain / dt : 0;
   const stepRateSmoothing = Math.min(1, dt * 7);
   state.stepPpRate += (stepRateTarget - state.stepPpRate) * stepRateSmoothing;
@@ -775,6 +777,7 @@ function updateStepPpRate(dt, stepPpGain) {
 
 function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
+  let stepPpGain = 0;
   last = now;
   const passivePpGain = state.ppRate * dt;
   if (state.offloadEnabled) {
@@ -819,7 +822,9 @@ function tick(now) {
       moveDir.multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
       player.position.add(moveDir);
       state.steps += moveDir.length() * 6;
-      state.pp += moveDir.length() * state.stepBonus;
+      const movementPpGain = moveDir.length() * state.stepBonus;
+      state.pp += movementPpGain;
+      stepPpGain += movementPpGain;
     }
 
     nodes.forEach((node) => {
@@ -910,6 +915,7 @@ function tick(now) {
   camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z, 0.12);
   camera.lookAt(player.position.x, 0, player.position.z);
 
+  updateStepPpRate(dt, stepPpGain);
   safeRenderUI();
   renderer.render(scene, camera);
   if (state.running) requestAnimationFrame(tick);
