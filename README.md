@@ -32,3 +32,11 @@ When testing in browser offline mode (DevTools Network = Offline), verify:
 - Pokemon-style combat cutaway with HP bars and Focus Point ring.
 - Actions: Fight, Items, Run, Skills (Jab, Heavy Hit, Kinetic Driver, Ballistic Lunge, Ion Beam, Scan).
 - Basic consumable crafting and usage in combat.
+
+## Troubleshooting blank screen
+
+If the game UI appears but the 3D viewport is blank, look for this message:
+
+- `3D engine failed to load.`
+
+This means the Three.js runtime was unavailable or failed during startup. The game now falls back to a degraded HUD-only mode (shown in the Environment label) so progression can continue while you fix rendering.
