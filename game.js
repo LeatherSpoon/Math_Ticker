@@ -9,6 +9,10 @@ const state = {
   running: true,
   pp: 0,
   ppRate: 1,
+  offloadEnabled: false,
+  offloadRatio: 1,
+  offloadExp: 0,
+  offloadSpent: 0,
   steps: 0,
   stepBonus: 0.03,
   env: 'Landing Site',
@@ -36,6 +40,7 @@ const state = {
 };
 
 const statCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 20]));
+const offloadStatCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 12]));
 
 let player = null;
 let ground = null;
@@ -141,6 +146,9 @@ window.addEventListener('resize', () => {
 const ui = {
   pp: document.getElementById('pp'),
   ppRate: document.getElementById('ppRate'),
+  offloadExp: document.getElementById('offloadExp'),
+  offloadStatus: document.getElementById('offloadStatus'),
+  toggleOffload: document.getElementById('toggleOffload'),
   steps: document.getElementById('steps'),
   resourceSummary: document.getElementById('resourceSummary'),
   statList: document.getElementById('statList'),
@@ -177,6 +185,11 @@ function showBootError(message) {
 function renderUI() {
   ui.pp.textContent = state.pp.toFixed(1);
   ui.ppRate.textContent = `(+${state.ppRate.toFixed(2)}/s)`;
+  ui.offloadExp.textContent = state.offloadExp.toFixed(1);
+  ui.offloadStatus.textContent = state.offloadEnabled
+    ? `(Enabled · ${Math.round(state.offloadRatio * 100)}% passive → OX · spent ${state.offloadSpent.toFixed(0)})`
+    : `(Disabled · spent ${state.offloadSpent.toFixed(0)})`;
+  ui.toggleOffload.textContent = state.offloadEnabled ? 'Disable Offload' : 'Enable Offload';
   ui.steps.textContent = Math.floor(state.steps);
   ui.resourceSummary.textContent = `copper ${state.resources.copper}, timber ${state.resources.timber}, stone ${state.resources.stone}`;
   ui.droneLevel.textContent = String(state.droneLevel);
@@ -189,13 +202,24 @@ function renderUI() {
     const row = document.createElement('div');
     row.className = 'stat-row';
     const cost = statCosts[key];
-    row.innerHTML = `<span>${key}</span><span>${value}</span><button>+ (${cost} PP)</button>`;
-    row.querySelector('button').addEventListener('click', () => {
+    const offloadCost = offloadStatCosts[key];
+    row.innerHTML = `<span>${key}</span><span>${value}</span><button class="pp-upgrade">+ (${cost} PP)</button><button class="offload-upgrade">Train (${offloadCost} OX)</button>`;
+    row.querySelector('.pp-upgrade').addEventListener('click', () => {
       if (state.pp >= cost) {
         state.pp -= cost;
         state.stats[key] += key === 'health' || key === 'focus' ? 10 : 1;
         statCosts[key] = Math.ceil(cost * 1.2);
         state.ppRate += 0.05;
+        if (key === 'health') state.playerHP = Math.min(state.playerHP + 10, state.stats.health);
+        renderUI();
+      }
+    });
+    row.querySelector('.offload-upgrade').addEventListener('click', () => {
+      if (state.offloadExp >= offloadCost) {
+        state.offloadExp -= offloadCost;
+        state.offloadSpent += offloadCost;
+        state.stats[key] += key === 'health' || key === 'focus' ? 10 : 1;
+        offloadStatCosts[key] = Math.ceil(offloadCost * 1.25);
         if (key === 'health') state.playerHP = Math.min(state.playerHP + 10, state.stats.health);
         renderUI();
       }
@@ -302,6 +326,11 @@ function wireUI() {
       state.droneLevel += 1;
       renderUI();
     }
+  });
+
+  ui.toggleOffload.addEventListener('click', () => {
+    state.offloadEnabled = !state.offloadEnabled;
+    renderUI();
   });
 
   ['copper', 'timber', 'stone', 'fiber', 'resin', 'quartz'].forEach((r) => {
@@ -493,7 +522,14 @@ let last = performance.now();
 function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  state.pp += state.ppRate * dt;
+  const passivePpGain = state.ppRate * dt;
+  if (state.offloadEnabled) {
+    const offloadGain = passivePpGain * state.offloadRatio;
+    state.offloadExp += offloadGain;
+    state.pp += passivePpGain - offloadGain;
+  } else {
+    state.pp += passivePpGain;
+  }
 
   if (degradedMode) {
     safeRenderUI();
@@ -545,7 +581,12 @@ function tick(now) {
       droneTimer = 0;
       const yieldAmt = Math.max(1, Math.floor(state.droneLevel * 0.85));
       state.resources[state.droneTarget] += yieldAmt;
-      state.pp += 0.5 * state.droneLevel;
+      const dronePpGain = 0.5 * state.droneLevel;
+      if (state.offloadEnabled) {
+        state.offloadExp += dronePpGain;
+      } else {
+        state.pp += dronePpGain;
+      }
     }
   } else if (combat) {
     combat.fp = Math.min(combat.fpMax, combat.fp + state.stats.focusRate * 8 * dt);
