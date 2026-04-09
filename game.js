@@ -1,20 +1,9 @@
 const canvas = document.getElementById('gameCanvas');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-renderer.shadowMap.enabled = true;
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x6b9ecf);
-
-const camera = new THREE.OrthographicCamera(-22, 22, 14, -14, 0.1, 100);
-camera.position.set(18, 20, 18);
-camera.lookAt(0, 0, 0);
-
-const light = new THREE.DirectionalLight(0xffffff, 1.1);
-light.position.set(10, 20, 6);
-scene.add(light);
-scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+let renderer = null;
+let scene = null;
+let camera = null;
+let game3DAvailable = false;
+let degradedMode = false;
 
 const state = {
   running: true,
@@ -49,14 +38,7 @@ const state = {
 const statCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 20]));
 
 let player = null;
-
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(200, 200),
-  new THREE.MeshStandardMaterial({ color: 0x7cad5d })
-);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
+let ground = null;
 
 const nodes = [];
 const enemies = [];
@@ -151,7 +133,10 @@ function spawnEnemy(name, x, z) {
 const keys = new Set();
 window.addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
-window.addEventListener('resize', () => renderer.setSize(canvas.clientWidth, canvas.clientHeight, false));
+window.addEventListener('resize', () => {
+  if (!renderer) return;
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+});
 
 const ui = {
   pp: document.getElementById('pp'),
@@ -197,7 +182,7 @@ function renderUI() {
   ui.droneLevel.textContent = String(state.droneLevel);
   ui.droneTarget.textContent = state.droneTarget;
   ui.inventory.textContent = `ration ${state.inventory.ration}, first aid ${state.inventory.firstAid}`;
-  ui.envLabel.textContent = state.env;
+  ui.envLabel.textContent = degradedMode ? `${state.env} (Degraded mode: 3D unavailable)` : state.env;
 
   ui.statList.innerHTML = '';
   Object.entries(state.stats).forEach(([key, value]) => {
@@ -252,7 +237,49 @@ function safeRenderUI() {
   }
 }
 
+function initGame() {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  renderer.shadowMap.enabled = true;
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x6b9ecf);
+
+  camera = new THREE.OrthographicCamera(-22, 22, 14, -14, 0.1, 100);
+  camera.position.set(18, 20, 18);
+  camera.lookAt(0, 0, 0);
+
+  const light = new THREE.DirectionalLight(0xffffff, 1.1);
+  light.position.set(10, 20, 6);
+  scene.add(light);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+
+  ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(200, 200),
+    new THREE.MeshStandardMaterial({ color: 0x7cad5d })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  player = buildCyborg();
+  player.position.set(0, 0, 0);
+  scene.add(player);
+
+  spawnNode('copper', -8, -5, 0xc17f43);
+  spawnNode('timber', 7, 4, 0x5d8f3a);
+  spawnNode('stone', 2, -7, 0x999999);
+  spawnNode('fiber', -10, 6, 0xb6db82);
+  spawnEnemy('Scrapper', 10, -2);
+  spawnEnemy('Scrapper', -4, 8);
+
+  game3DAvailable = true;
+  degradedMode = false;
+}
+
 function applyEnvironmentTint() {
+  if (!ground || !scene) return;
   const map = {
     'Landing Site': [0x7cad5d, 0x6b9ecf],
     Mine: [0x656565, 0x505e69],
@@ -467,8 +494,14 @@ function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
 
-  if (!player) {
+  if (degradedMode) {
     state.pp += state.ppRate * dt;
+    safeRenderUI();
+    if (state.running) requestAnimationFrame(tick);
+    return;
+  }
+
+  if (!game3DAvailable || !player || !scene || !camera || !renderer || !ground) {
     safeRenderUI();
     if (state.running) requestAnimationFrame(tick);
     return;
@@ -544,34 +577,31 @@ function tick(now) {
   if (state.running) requestAnimationFrame(tick);
 }
 
-try {
-  player = buildCyborg();
-  player.position.set(0, 0, 0);
-  scene.add(player);
-
-  spawnNode('copper', -8, -5, 0xc17f43);
-  spawnNode('timber', 7, 4, 0x5d8f3a);
-  spawnNode('stone', 2, -7, 0x999999);
-  spawnNode('fiber', -10, 6, 0xb6db82);
-  spawnEnemy('Scrapper', 10, -2);
-  spawnEnemy('Scrapper', -4, 8);
-
+function boot() {
   wireUI();
-  safeRenderUI();
-  applyEnvironmentTint();
-  requestAnimationFrame(tick);
-} catch (error) {
-  showBootError('Game failed to initialize. Open console for details.');
-  console.error(error);
-  try {
-    wireUI();
-  } catch (wireError) {
-    console.error(wireError);
-  }
-  try {
+
+  if (!window.THREE) {
+    degradedMode = true;
+    game3DAvailable = false;
+    showBootError('3D engine failed to load.');
     safeRenderUI();
     requestAnimationFrame(tick);
-  } catch (fallbackError) {
-    console.error(fallbackError);
+    return;
+  }
+
+  try {
+    initGame();
+    safeRenderUI();
+    applyEnvironmentTint();
+    requestAnimationFrame(tick);
+  } catch (error) {
+    degradedMode = true;
+    game3DAvailable = false;
+    showBootError(`3D engine failed to load: ${error?.message || 'unknown error'}`);
+    console.error(error);
+    safeRenderUI();
+    requestAnimationFrame(tick);
   }
 }
+
+boot();
