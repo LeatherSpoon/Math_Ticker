@@ -5,6 +5,12 @@ let camera = null;
 let game3DAvailable = false;
 let degradedMode = false;
 
+// Movement economy tuning.
+// Calibrated so one visible body-length of travel maps to a fixed step count.
+const STEPS_PER_BODY_LENGTH = 2;
+const PLAYER_BODY_LENGTH_WORLD_UNITS = 1.6;
+const WORLD_UNITS_PER_STEP = PLAYER_BODY_LENGTH_WORLD_UNITS / STEPS_PER_BODY_LENGTH;
+
 const state = {
   running: true,
   pp: 0,
@@ -517,8 +523,10 @@ function tick(now) {
     if (move.lengthSq() > 0) {
       move.normalize().multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
       player.position.add(move);
-      state.steps += move.length() * 6;
-      state.pp += move.length() * state.stepBonus;
+      const distanceTraveled = move.length();
+      const stepsFromDistance = distanceTraveled / WORLD_UNITS_PER_STEP;
+      state.steps += stepsFromDistance;
+      state.pp += distanceTraveled * state.stepBonus;
     }
 
     nodes.forEach((node) => {
