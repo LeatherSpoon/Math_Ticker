@@ -54,6 +54,7 @@ let ground = null;
 let keyLight = null;
 let fillLight = null;
 let rimLight = null;
+let environmentLightRig = null;
 
 const nodes = [];
 const enemies = [];
@@ -314,6 +315,48 @@ function updateEnvironmentBoundVisibility() {
   });
 }
 
+function setActiveEnvironmentGroup(envName = state.env) {
+  if (!environmentLightRig) return;
+
+  const lightProfiles = {
+    'Landing Site': {
+      keyPos: [10, 20, 6],
+      keyIntensity: 1.1,
+      fillIntensity: 0.55,
+      rimPos: [-12, 8, -20],
+      rimIntensity: 0.3,
+    },
+    Mine: {
+      keyPos: [6, 13, 4],
+      keyIntensity: 0.72,
+      fillIntensity: 0.36,
+      rimPos: [-9, 6, -14],
+      rimIntensity: 0.22,
+    },
+    'Verdant Maw': {
+      keyPos: [8, 17, 7],
+      keyIntensity: 0.96,
+      fillIntensity: 0.62,
+      rimPos: [-11, 7, -17],
+      rimIntensity: 0.36,
+    },
+    'Lagoon Coast': {
+      keyPos: [12, 18, 5],
+      keyIntensity: 1.0,
+      fillIntensity: 0.68,
+      rimPos: [-10, 7, -18],
+      rimIntensity: 0.28,
+    },
+  };
+
+  const profile = lightProfiles[envName] || lightProfiles['Landing Site'];
+  keyLight.position.set(...profile.keyPos);
+  keyLight.intensity = profile.keyIntensity;
+  fillLight.intensity = profile.fillIntensity;
+  rimLight.position.set(...profile.rimPos);
+  rimLight.intensity = profile.rimIntensity;
+}
+
 const keys = new Set();
 window.addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
@@ -514,6 +557,7 @@ function applyEnvironmentTint() {
   const [groundColor, bg] = map[state.env] || map['Landing Site'];
   ground.material.color.setHex(groundColor);
   scene.background.setHex(bg);
+  setActiveEnvironmentGroup(state.env);
   updateEnvironmentBoundVisibility();
 }
 
