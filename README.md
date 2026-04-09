@@ -11,6 +11,7 @@ Open `index.html` in a browser.
 - Core gameplay should start from **local assets only**.
 - Three.js is loaded from `vendor/three.min.js` as the primary dependency path.
 - A CDN script is kept as an **optional fallback only** if the local bundle is missing.
+- CDN fallback is **opt-in** and disabled by default. Enable it only for manual recovery (`window.__ALLOW_THREE_CDN_FALLBACK__ = true` before the loader runs, or `?allowThreeCdnFallback=1`).
 - For deterministic deployments, ship a pinned `vendor/three.min.js` artifact with your release so no external network is needed for startup.
 - `game.js` has a startup guard: if `window.THREE` is missing, gameplay initialization halts and an explicit boot error panel is shown.
 
@@ -40,3 +41,12 @@ If the game UI appears but the 3D viewport is blank, look for this message:
 - `3D engine failed to load.`
 
 This means the Three.js runtime was unavailable or failed during startup. The game now falls back to a degraded HUD-only mode (shown in the Environment label) so progression can continue while you fix rendering.
+
+## Release sanity checks
+
+Before shipping, verify the vendored Three.js runtime is a real artifact and not a stub:
+
+1. `test -s vendor/three.min.js`
+2. `wc -c vendor/three.min.js` should report a non-trivial size (recommendation: **> 500000 bytes** for r159 classic build).
+3. `rg "Local Three.js placeholder" vendor/three.min.js` should return no matches.
+4. Optional runtime smoke test in browser console after load: `typeof window.THREE === 'object' && typeof THREE.WebGLRenderer === 'function'`.
