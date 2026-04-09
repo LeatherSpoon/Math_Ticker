@@ -20,7 +20,7 @@ const state = {
   offloadExp: 0,
   offloadSpent: 0,
   steps: 0,
-  stepBonus: 0.03,
+  stepBonus: 0.2,
   env: 'Landing Site',
   droneLevel: 1,
   droneTarget: 'copper',
@@ -534,6 +534,12 @@ function dealDamage(amount, label = 'Fight') {
 let droneTimer = 0;
 let last = performance.now();
 
+function updateStepPpRate(dt, stepPpGain) {
+  const stepRateTarget = dt > 0 ? stepPpGain / dt : 0;
+  const stepRateSmoothing = Math.min(1, dt * 7);
+  state.stepPpRate += (stepRateTarget - state.stepPpRate) * stepRateSmoothing;
+}
+
 function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -547,12 +553,14 @@ function tick(now) {
   }
 
   if (degradedMode) {
+    updateStepPpRate(dt, stepPpGain);
     safeRenderUI();
     if (state.running) requestAnimationFrame(tick);
     return;
   }
 
   if (!game3DAvailable || !player || !scene || !camera || !renderer || !ground) {
+    updateStepPpRate(dt, stepPpGain);
     safeRenderUI();
     if (state.running) requestAnimationFrame(tick);
     return;
