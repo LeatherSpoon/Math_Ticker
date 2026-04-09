@@ -820,11 +820,11 @@ function tick(now) {
       player.rotation.y += angleDelta * turnSmoothing;
 
       moveDir.multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
+      const movementDistance = moveDir.length();
       player.position.add(moveDir);
-      state.steps += moveDir.length() * 6;
-      const movementPpGain = moveDir.length() * state.stepBonus;
-      state.pp += movementPpGain;
-      stepPpGain += movementPpGain;
+      state.steps += movementDistance * 6;
+      stepPpGain = movementDistance * state.stepBonus;
+      state.pp += stepPpGain;
     }
 
     nodes.forEach((node) => {
