@@ -5,12 +5,22 @@ let camera = null;
 let game3DAvailable = false;
 let degradedMode = false;
 
+// Movement economy tuning.
+// Calibrated so one visible body-length of travel maps to a fixed step count.
+const STEPS_PER_BODY_LENGTH = 2;
+const PLAYER_BODY_LENGTH_WORLD_UNITS = 1.6;
+const WORLD_UNITS_PER_STEP = PLAYER_BODY_LENGTH_WORLD_UNITS / STEPS_PER_BODY_LENGTH;
+
 const state = {
   running: true,
   pp: 0,
   ppRate: 1,
+  offloadEnabled: false,
+  offloadRatio: 1,
+  offloadExp: 0,
+  offloadSpent: 0,
   steps: 0,
-  stepBonus: 0.03,
+  stepBonus: 0.2,
   env: 'Landing Site',
   droneLevel: 1,
   droneTarget: 'copper',
@@ -36,6 +46,7 @@ const state = {
 };
 
 const statCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 20]));
+const offloadStatCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 12]));
 
 let player = null;
 let drone = null;
@@ -43,6 +54,8 @@ let ground = null;
 
 const nodes = [];
 const enemies = [];
+const landmarks = {};
+const envBoundObjects = [];
 
 function stylizedMesh(geometry, color) {
   const body = new THREE.Mesh(
@@ -192,8 +205,16 @@ function setDroneVisualLevel(level = state.droneLevel) {
 
 function spawnNode(type, x, z, color) {
   const node = stylizedMesh(new THREE.DodecahedronGeometry(0.8, 0), color);
-  node.position.set(x, 0.8, z);
-  node.userData = { type };
+  const origin = new THREE.Vector3(x, 0.8, z);
+  node.position.copy(origin);
+  node.userData = {
+    type,
+    origin,
+    active: true,
+    respawnTimer: 0,
+    respawnDelay: 5,
+    pulsePhase: Math.random() * Math.PI * 2,
+  };
   scene.add(node);
   nodes.push(node);
 }
@@ -209,6 +230,87 @@ function spawnEnemy(name, x, z) {
   enemies.push(e);
 }
 
+function registerEnvBoundObject(object3D, visibleEnvs = ['Landing Site']) {
+  object3D.userData.visibleEnvs = visibleEnvs;
+  envBoundObjects.push(object3D);
+}
+
+function createCaveEntrance(x, z) {
+  const cave = new THREE.Group();
+
+  const shell = stylizedMesh(new THREE.CylinderGeometry(3.6, 4.6, 3.8, 16, 1, true), 0x5f6770);
+  shell.position.y = 1.9;
+  cave.add(shell);
+
+  const mouth = new THREE.Mesh(
+    new THREE.TorusGeometry(1.6, 0.35, 10, 18, Math.PI),
+    new THREE.MeshStandardMaterial({ color: 0x2f3338, roughness: 0.95, metalness: 0.02 })
+  );
+  mouth.rotation.x = Math.PI / 2;
+  mouth.position.set(0, 1.2, 1.15);
+  cave.add(mouth);
+
+  const opening = new THREE.Mesh(
+    new THREE.CircleGeometry(1.4, 16),
+    new THREE.MeshBasicMaterial({ color: 0x050505 })
+  );
+  opening.position.set(0, 1.2, 1.2);
+  cave.add(opening);
+
+  const ridge = stylizedMesh(new THREE.ConeGeometry(2.6, 3.8, 7), 0x4f5861);
+  ridge.position.set(-2.6, 1.9, -1.2);
+  cave.add(ridge);
+
+  const treeA = stylizedMesh(new THREE.ConeGeometry(0.85, 2, 8), 0x3d6c3b);
+  treeA.position.set(2.4, 1.1, -0.2);
+  cave.add(treeA);
+
+  const treeB = stylizedMesh(new THREE.ConeGeometry(0.65, 1.6, 8), 0x4d7b45);
+  treeB.position.set(3.2, 0.95, -1.1);
+  cave.add(treeB);
+
+  cave.position.set(x, 0, z);
+  cave.rotation.y = -0.4;
+  scene.add(cave);
+  return cave;
+}
+
+function createTrailRoute(start, end) {
+  const route = new THREE.Group();
+  const mid1 = new THREE.Vector3(start.x + 4, 0.06, start.z - 3);
+  const mid2 = new THREE.Vector3(end.x - 6, 0.06, end.z + 2);
+  const curve = new THREE.CatmullRomCurve3([start.clone(), mid1, mid2, end.clone()]);
+
+  const points = curve.getPoints(40);
+  const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+  const line = new THREE.Line(
+    lineGeometry,
+    new THREE.LineBasicMaterial({ color: 0xffdd73, transparent: true, opacity: 0.8 })
+  );
+  route.add(line);
+
+  for (let i = 0; i <= 9; i += 1) {
+    const t = i / 9;
+    const markerPos = curve.getPoint(t);
+    const marker = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.23, 0.31, 0.2, 8),
+      new THREE.MeshStandardMaterial({ color: 0xc39d52, emissive: 0x3b2a08, roughness: 0.85 })
+    );
+    marker.position.set(markerPos.x, 0.1, markerPos.z);
+    route.add(marker);
+  }
+
+  scene.add(route);
+  return route;
+}
+
+function updateEnvironmentBoundVisibility() {
+  envBoundObjects.forEach((obj) => {
+    const visibleEnvs = obj.userData.visibleEnvs || ['Landing Site'];
+    obj.visible = visibleEnvs.includes(state.env);
+  });
+}
+
 const keys = new Set();
 window.addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
@@ -220,6 +322,9 @@ window.addEventListener('resize', () => {
 const ui = {
   pp: document.getElementById('pp'),
   ppRate: document.getElementById('ppRate'),
+  offloadExp: document.getElementById('offloadExp'),
+  offloadStatus: document.getElementById('offloadStatus'),
+  toggleOffload: document.getElementById('toggleOffload'),
   steps: document.getElementById('steps'),
   resourceSummary: document.getElementById('resourceSummary'),
   statList: document.getElementById('statList'),
@@ -256,6 +361,11 @@ function showBootError(message) {
 function renderUI() {
   ui.pp.textContent = state.pp.toFixed(1);
   ui.ppRate.textContent = `(+${state.ppRate.toFixed(2)}/s)`;
+  ui.offloadExp.textContent = state.offloadExp.toFixed(1);
+  ui.offloadStatus.textContent = state.offloadEnabled
+    ? `(Enabled · ${Math.round(state.offloadRatio * 100)}% passive → OX · spent ${state.offloadSpent.toFixed(0)})`
+    : `(Disabled · spent ${state.offloadSpent.toFixed(0)})`;
+  ui.toggleOffload.textContent = state.offloadEnabled ? 'Disable Offload' : 'Enable Offload';
   ui.steps.textContent = Math.floor(state.steps);
   ui.resourceSummary.textContent = `copper ${state.resources.copper}, timber ${state.resources.timber}, stone ${state.resources.stone}`;
   ui.droneLevel.textContent = String(state.droneLevel);
@@ -268,13 +378,24 @@ function renderUI() {
     const row = document.createElement('div');
     row.className = 'stat-row';
     const cost = statCosts[key];
-    row.innerHTML = `<span>${key}</span><span>${value}</span><button>+ (${cost} PP)</button>`;
-    row.querySelector('button').addEventListener('click', () => {
+    const offloadCost = offloadStatCosts[key];
+    row.innerHTML = `<span>${key}</span><span>${value}</span><button class="pp-upgrade">+ (${cost} PP)</button><button class="offload-upgrade">Train (${offloadCost} OX)</button>`;
+    row.querySelector('.pp-upgrade').addEventListener('click', () => {
       if (state.pp >= cost) {
         state.pp -= cost;
         state.stats[key] += key === 'health' || key === 'focus' ? 10 : 1;
         statCosts[key] = Math.ceil(cost * 1.2);
         state.ppRate += 0.05;
+        if (key === 'health') state.playerHP = Math.min(state.playerHP + 10, state.stats.health);
+        renderUI();
+      }
+    });
+    row.querySelector('.offload-upgrade').addEventListener('click', () => {
+      if (state.offloadExp >= offloadCost) {
+        state.offloadExp -= offloadCost;
+        state.offloadSpent += offloadCost;
+        state.stats[key] += key === 'health' || key === 'focus' ? 10 : 1;
+        offloadStatCosts[key] = Math.ceil(offloadCost * 1.25);
         if (key === 'health') state.playerHP = Math.min(state.playerHP + 10, state.stats.health);
         renderUI();
       }
@@ -325,8 +446,9 @@ function initGame() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x6b9ecf);
 
-  camera = new THREE.OrthographicCamera(-22, 22, 14, -14, 0.1, 100);
-  camera.position.set(18, 20, 18);
+  camera = new THREE.OrthographicCamera(-22, 22, 14, -14, 0.1, 120);
+  camera.position.set(0, 42, 0);
+  camera.up.set(0, 0, -1);
   camera.lookAt(0, 0, 0);
 
   const light = new THREE.DirectionalLight(0xffffff, 1.1);
@@ -357,6 +479,18 @@ function initGame() {
   spawnEnemy('Scrapper', 10, -2);
   spawnEnemy('Scrapper', -4, 8);
 
+  const spawnAnchor = new THREE.Vector3(0, 0.06, 0);
+  const cavePosition = new THREE.Vector3(22, 0.06, -11);
+  const caveEntrance = createCaveEntrance(cavePosition.x, cavePosition.z);
+  landmarks.caveEntrance = caveEntrance;
+  registerEnvBoundObject(caveEntrance, ['Landing Site', 'Verdant Maw']);
+
+  const caveTrail = createTrailRoute(spawnAnchor, cavePosition);
+  landmarks.caveTrail = caveTrail;
+  registerEnvBoundObject(caveTrail, ['Landing Site']);
+
+  updateEnvironmentBoundVisibility();
+
   game3DAvailable = true;
   degradedMode = false;
 }
@@ -372,6 +506,7 @@ function applyEnvironmentTint() {
   const [groundColor, bg] = map[state.env] || map['Landing Site'];
   ground.material.color.setHex(groundColor);
   scene.background.setHex(bg);
+  updateEnvironmentBoundVisibility();
 }
 
 function wireUI() {
@@ -386,6 +521,11 @@ function wireUI() {
       setDroneVisualLevel(state.droneLevel);
       renderUI();
     }
+  });
+
+  ui.toggleOffload.addEventListener('click', () => {
+    state.offloadEnabled = !state.offloadEnabled;
+    renderUI();
   });
 
   ['copper', 'timber', 'stone', 'fiber', 'resin', 'quartz'].forEach((r) => {
@@ -575,101 +715,33 @@ let droneTimer = 0;
 let rescueSequence = null;
 let last = performance.now();
 
-function updateDroneFlight(dt) {
-  if (!drone || !player || !scene) return;
-
-  drone.userData.orbitAngle += dt * (0.9 + state.droneLevel * 0.08);
-  drone.userData.gatherPulse += dt * 2.2;
-  drone.userData.gatherCooldown += dt;
-
-  const orbitRadius = 2 + Math.min(2.2, state.droneLevel * 0.17);
-  const orbitHeight = 2.1 + Math.sin(drone.userData.gatherPulse) * 0.25;
-  const followAnchor = new THREE.Vector3(
-    player.position.x + Math.cos(drone.userData.orbitAngle) * orbitRadius,
-    orbitHeight,
-    player.position.z + Math.sin(drone.userData.orbitAngle) * orbitRadius
-  );
-
-  let desired = followAnchor;
-  const assignedNodes = nodes.filter((node) => node.userData.type === state.droneTarget);
-  let targetNode = null;
-  if (assignedNodes.length > 0) {
-    targetNode = assignedNodes.reduce((best, node) => {
-      if (!best) return node;
-      const bestDist = best.position.distanceTo(player.position);
-      const nodeDist = node.position.distanceTo(player.position);
-      return nodeDist < bestDist ? node : best;
-    }, null);
-  }
-
-  if (targetNode && drone.userData.gatherCooldown > 1.1) {
-    const gatherPoint = new THREE.Vector3(
-      targetNode.position.x,
-      1.8 + Math.sin(drone.userData.gatherPulse * 1.6) * 0.3,
-      targetNode.position.z
-    );
-    const proximityToPlayer = Math.min(1, targetNode.position.distanceTo(player.position) / 20);
-    const gatherWeight = THREE.MathUtils.clamp(0.65 - proximityToPlayer * 0.3, 0.2, 0.65);
-    desired = followAnchor.clone().lerp(gatherPoint, gatherWeight);
-  }
-
-  const smoothing = THREE.MathUtils.clamp(0.05 + state.droneLevel * 0.012, 0.05, 0.2);
-  drone.position.lerp(desired, smoothing);
-  drone.lookAt(player.position.x, player.position.y + 1.8, player.position.z);
-  drone.rotation.z += Math.sin(drone.userData.gatherPulse) * 0.015;
-}
-
-function runRescueSequence(dt) {
-  if (!rescueSequence || !drone || !player || !combat) return false;
-
-  rescueSequence.timer += dt;
-
-  if (rescueSequence.phase === 'approach') {
-    const pickupPoint = new THREE.Vector3(player.position.x, 1.6, player.position.z);
-    drone.position.lerp(pickupPoint, 0.2);
-    drone.lookAt(player.position.x, player.position.y + 1.1, player.position.z);
-    if (drone.position.distanceTo(pickupPoint) < 0.5 || rescueSequence.timer > 1.25) {
-      rescueSequence.phase = 'extract';
-      rescueSequence.timer = 0;
-      logCombat('Drone lock acquired. Extracting...');
-    }
-    return true;
-  }
-
-  if (rescueSequence.phase === 'extract') {
-    rescueSequence.lift = Math.min(1, rescueSequence.lift + dt * 0.65);
-    const rise = 3.8 * rescueSequence.lift;
-    player.position.y = rise;
-    drone.position.set(
-      THREE.MathUtils.lerp(drone.position.x, player.position.x + 0.3, 0.25),
-      2 + rise,
-      THREE.MathUtils.lerp(drone.position.z, player.position.z + 0.3, 0.25)
-    );
-    if (rescueSequence.timer > 1.75) {
-      player.position.set(0, 0, 0);
-      state.env = 'Landing Site';
-      applyEnvironmentTint();
-      rescueSequence = null;
-      closeCombat(false);
-    }
-    return true;
-  }
-
-  return false;
+function updateStepPpRate(dt, stepPpGain) {
+  const stepRateTarget = dt > 0 ? stepPpGain / dt : 0;
+  const stepRateSmoothing = Math.min(1, dt * 7);
+  state.stepPpRate += (stepRateTarget - state.stepPpRate) * stepRateSmoothing;
 }
 
 function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  state.pp += state.ppRate * dt;
+  const passivePpGain = state.ppRate * dt;
+  if (state.offloadEnabled) {
+    const offloadGain = passivePpGain * state.offloadRatio;
+    state.offloadExp += offloadGain;
+    state.pp += passivePpGain - offloadGain;
+  } else {
+    state.pp += passivePpGain;
+  }
 
   if (degradedMode) {
+    updateStepPpRate(dt, stepPpGain);
     safeRenderUI();
     if (state.running) requestAnimationFrame(tick);
     return;
   }
 
   if (!game3DAvailable || !player || !scene || !camera || !renderer || !ground) {
+    updateStepPpRate(dt, stepPpGain);
     safeRenderUI();
     if (state.running) requestAnimationFrame(tick);
     return;
@@ -683,21 +755,60 @@ function tick(now) {
     if (keys.has('d') || keys.has('arrowright')) move.x += 1;
 
     if (move.lengthSq() > 0) {
-      move.normalize().multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
-      player.position.add(move);
-      state.steps += move.length() * 6;
-      state.pp += move.length() * state.stepBonus;
+      const moveDir = move.normalize();
+      const heading = Math.atan2(moveDir.x, moveDir.z);
+      const turnSmoothing = 0.18;
+      const angleDelta = Math.atan2(
+        Math.sin(heading - player.rotation.y),
+        Math.cos(heading - player.rotation.y)
+      );
+      player.rotation.y += angleDelta * turnSmoothing;
+
+      moveDir.multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
+      player.position.add(moveDir);
+      state.steps += moveDir.length() * 6;
+      state.pp += moveDir.length() * state.stepBonus;
     }
 
     nodes.forEach((node) => {
+      const descriptor = node.userData;
+      const pulse = 1 + Math.sin(now * 0.0017 + descriptor.pulsePhase) * 0.025;
+      node.scale.setScalar(pulse);
       node.rotation.y += 0.9 * dt;
+
+      if (!descriptor.active) {
+        descriptor.respawnTimer -= dt;
+        const fadeIn = descriptor.respawnDelay > 0
+          ? THREE.MathUtils.clamp(1 - (descriptor.respawnTimer / descriptor.respawnDelay), 0, 1)
+          : 1;
+        node.visible = fadeIn > 0;
+        node.children.forEach((mesh) => {
+          if (mesh.material) {
+            mesh.material.transparent = true;
+            mesh.material.opacity = fadeIn;
+          }
+        });
+
+        if (descriptor.respawnTimer <= 0) {
+          descriptor.active = true;
+          descriptor.respawnTimer = 0;
+          node.visible = true;
+          node.position.copy(descriptor.origin);
+          node.children.forEach((mesh) => {
+            if (mesh.material) mesh.material.opacity = 1;
+          });
+        }
+        return;
+      }
+
       if (node.position.distanceTo(player.position) < 1.4) {
         const type = node.userData.type;
         const gain = 1 + Math.floor(state.stats.perception / 4);
         state.resources[type] += gain;
         state.pp += 3;
-        node.position.x = (Math.random() - 0.5) * 24;
-        node.position.z = (Math.random() - 0.5) * 16;
+        descriptor.active = false;
+        descriptor.respawnTimer = descriptor.respawnDelay;
+        node.visible = false;
       }
     });
 
@@ -713,7 +824,12 @@ function tick(now) {
       droneTimer = 0;
       const yieldAmt = Math.max(1, Math.floor(state.droneLevel * 0.85));
       state.resources[state.droneTarget] += yieldAmt;
-      state.pp += 0.5 * state.droneLevel;
+      const dronePpGain = 0.5 * state.droneLevel;
+      if (state.offloadEnabled) {
+        state.offloadExp += dronePpGain;
+      } else {
+        state.pp += dronePpGain;
+      }
     }
 
     updateDroneFlight(dt);
@@ -738,8 +854,8 @@ function tick(now) {
     }
   }
 
-  camera.position.x = THREE.MathUtils.lerp(camera.position.x, player.position.x + 18, 0.06);
-  camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z + 18, 0.06);
+  camera.position.x = THREE.MathUtils.lerp(camera.position.x, player.position.x, 0.12);
+  camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z, 0.12);
   camera.lookAt(player.position.x, 0, player.position.z);
 
   safeRenderUI();

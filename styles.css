@@ -141,8 +141,17 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 small { opacity: 0.9; }
 .stat-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: 0.3rem;
   align-items: center;
   margin-bottom: 0.25rem;
+}
+
+#offloadStatus {
+  color: var(--accent);
+}
+
+.offload-upgrade {
+  border-color: #7effae;
+  background: #1d3f36;
 }
