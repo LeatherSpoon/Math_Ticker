@@ -15,10 +15,23 @@
           };
         }
 
+        const fallbackEnabled =
+          window.__ALLOW_THREE_CDN_FALLBACK__ === true ||
+          new URLSearchParams(window.location.search).get('allowThreeCdnFallback') === '1';
+
+        if (!fallbackEnabled) {
+          return {
+            ready: Promise.reject(
+              new Error('Local Three.js runtime missing and CDN fallback is disabled.')
+            ),
+            source: 'missing-local',
+          };
+        }
+
         let source = 'fallback-pending';
         const ready = new Promise((resolve, reject) => {
           const fallback = document.createElement('script');
-          fallback.src = 'https://unpkg.com/three@0.161.0/build/three.min.js';
+          fallback.src = 'https://unpkg.com/three@0.159.0/build/three.min.js';
           fallback.crossOrigin = 'anonymous';
           fallback.onload = () => {
             source = 'fallback';
