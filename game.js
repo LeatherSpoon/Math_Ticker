@@ -5,11 +5,20 @@ let camera = null;
 let game3DAvailable = false;
 let degradedMode = false;
 
+// Movement economy tuning.
+// Calibrated so one visible body-length of travel maps to a fixed step count.
+const STEPS_PER_BODY_LENGTH = 2;
+const PLAYER_BODY_LENGTH_WORLD_UNITS = 1.6;
+const WORLD_UNITS_PER_STEP = PLAYER_BODY_LENGTH_WORLD_UNITS / STEPS_PER_BODY_LENGTH;
+
 const state = {
   running: true,
   pp: 0,
   ppRate: 1,
-  stepPpRate: 0,
+  offloadEnabled: false,
+  offloadRatio: 1,
+  offloadExp: 0,
+  offloadSpent: 0,
   steps: 0,
   stepBonus: 0.2,
   env: 'Landing Site',
@@ -37,6 +46,7 @@ const state = {
 };
 
 const statCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 20]));
+const offloadStatCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 12]));
 
 let player = null;
 let ground = null;
@@ -114,8 +124,16 @@ function buildCyborg() {
 
 function spawnNode(type, x, z, color) {
   const node = stylizedMesh(new THREE.DodecahedronGeometry(0.8, 0), color);
-  node.position.set(x, 0.8, z);
-  node.userData = { type };
+  const origin = new THREE.Vector3(x, 0.8, z);
+  node.position.copy(origin);
+  node.userData = {
+    type,
+    origin,
+    active: true,
+    respawnTimer: 0,
+    respawnDelay: 5,
+    pulsePhase: Math.random() * Math.PI * 2,
+  };
   scene.add(node);
   nodes.push(node);
 }
@@ -141,9 +159,10 @@ window.addEventListener('resize', () => {
 
 const ui = {
   pp: document.getElementById('pp'),
-  passivePpRate: document.getElementById('passivePpRate'),
-  stepPpRate: document.getElementById('stepPpRate'),
-  totalPpRate: document.getElementById('totalPpRate'),
+  ppRate: document.getElementById('ppRate'),
+  offloadExp: document.getElementById('offloadExp'),
+  offloadStatus: document.getElementById('offloadStatus'),
+  toggleOffload: document.getElementById('toggleOffload'),
   steps: document.getElementById('steps'),
   resourceSummary: document.getElementById('resourceSummary'),
   statList: document.getElementById('statList'),
@@ -179,9 +198,12 @@ function showBootError(message) {
 
 function renderUI() {
   ui.pp.textContent = state.pp.toFixed(1);
-  ui.passivePpRate.textContent = `+${state.ppRate.toFixed(2)}/s`;
-  ui.stepPpRate.textContent = `+${state.stepPpRate.toFixed(2)}/s`;
-  ui.totalPpRate.textContent = `+${(state.ppRate + state.stepPpRate).toFixed(2)}/s`;
+  ui.ppRate.textContent = `(+${state.ppRate.toFixed(2)}/s)`;
+  ui.offloadExp.textContent = state.offloadExp.toFixed(1);
+  ui.offloadStatus.textContent = state.offloadEnabled
+    ? `(Enabled · ${Math.round(state.offloadRatio * 100)}% passive → OX · spent ${state.offloadSpent.toFixed(0)})`
+    : `(Disabled · spent ${state.offloadSpent.toFixed(0)})`;
+  ui.toggleOffload.textContent = state.offloadEnabled ? 'Disable Offload' : 'Enable Offload';
   ui.steps.textContent = Math.floor(state.steps);
   ui.resourceSummary.textContent = `copper ${state.resources.copper}, timber ${state.resources.timber}, stone ${state.resources.stone}`;
   ui.droneLevel.textContent = String(state.droneLevel);
@@ -194,13 +216,24 @@ function renderUI() {
     const row = document.createElement('div');
     row.className = 'stat-row';
     const cost = statCosts[key];
-    row.innerHTML = `<span>${key}</span><span>${value}</span><button>+ (${cost} PP)</button>`;
-    row.querySelector('button').addEventListener('click', () => {
+    const offloadCost = offloadStatCosts[key];
+    row.innerHTML = `<span>${key}</span><span>${value}</span><button class="pp-upgrade">+ (${cost} PP)</button><button class="offload-upgrade">Train (${offloadCost} OX)</button>`;
+    row.querySelector('.pp-upgrade').addEventListener('click', () => {
       if (state.pp >= cost) {
         state.pp -= cost;
         state.stats[key] += key === 'health' || key === 'focus' ? 10 : 1;
         statCosts[key] = Math.ceil(cost * 1.2);
         state.ppRate += 0.05;
+        if (key === 'health') state.playerHP = Math.min(state.playerHP + 10, state.stats.health);
+        renderUI();
+      }
+    });
+    row.querySelector('.offload-upgrade').addEventListener('click', () => {
+      if (state.offloadExp >= offloadCost) {
+        state.offloadExp -= offloadCost;
+        state.offloadSpent += offloadCost;
+        state.stats[key] += key === 'health' || key === 'focus' ? 10 : 1;
+        offloadStatCosts[key] = Math.ceil(offloadCost * 1.25);
         if (key === 'health') state.playerHP = Math.min(state.playerHP + 10, state.stats.health);
         renderUI();
       }
@@ -251,8 +284,9 @@ function initGame() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x6b9ecf);
 
-  camera = new THREE.OrthographicCamera(-22, 22, 14, -14, 0.1, 100);
-  camera.position.set(18, 20, 18);
+  camera = new THREE.OrthographicCamera(-22, 22, 14, -14, 0.1, 120);
+  camera.position.set(0, 42, 0);
+  camera.up.set(0, 0, -1);
   camera.lookAt(0, 0, 0);
 
   const light = new THREE.DirectionalLight(0xffffff, 1.1);
@@ -307,6 +341,11 @@ function wireUI() {
       state.droneLevel += 1;
       renderUI();
     }
+  });
+
+  ui.toggleOffload.addEventListener('click', () => {
+    state.offloadEnabled = !state.offloadEnabled;
+    renderUI();
   });
 
   ['copper', 'timber', 'stone', 'fiber', 'resin', 'quartz'].forEach((r) => {
@@ -504,8 +543,14 @@ function updateStepPpRate(dt, stepPpGain) {
 function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  state.pp += state.ppRate * dt;
-  let stepPpGain = 0;
+  const passivePpGain = state.ppRate * dt;
+  if (state.offloadEnabled) {
+    const offloadGain = passivePpGain * state.offloadRatio;
+    state.offloadExp += offloadGain;
+    state.pp += passivePpGain - offloadGain;
+  } else {
+    state.pp += passivePpGain;
+  }
 
   if (degradedMode) {
     updateStepPpRate(dt, stepPpGain);
@@ -529,22 +574,60 @@ function tick(now) {
     if (keys.has('d') || keys.has('arrowright')) move.x += 1;
 
     if (move.lengthSq() > 0) {
-      move.normalize().multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
-      player.position.add(move);
-      state.steps += move.length() * 6;
-      stepPpGain = move.length() * state.stepBonus;
-      state.pp += stepPpGain;
+      const moveDir = move.normalize();
+      const heading = Math.atan2(moveDir.x, moveDir.z);
+      const turnSmoothing = 0.18;
+      const angleDelta = Math.atan2(
+        Math.sin(heading - player.rotation.y),
+        Math.cos(heading - player.rotation.y)
+      );
+      player.rotation.y += angleDelta * turnSmoothing;
+
+      moveDir.multiplyScalar((2.2 + state.stats.speed * 0.23) * dt);
+      player.position.add(moveDir);
+      state.steps += moveDir.length() * 6;
+      state.pp += moveDir.length() * state.stepBonus;
     }
 
     nodes.forEach((node) => {
+      const descriptor = node.userData;
+      const pulse = 1 + Math.sin(now * 0.0017 + descriptor.pulsePhase) * 0.025;
+      node.scale.setScalar(pulse);
       node.rotation.y += 0.9 * dt;
+
+      if (!descriptor.active) {
+        descriptor.respawnTimer -= dt;
+        const fadeIn = descriptor.respawnDelay > 0
+          ? THREE.MathUtils.clamp(1 - (descriptor.respawnTimer / descriptor.respawnDelay), 0, 1)
+          : 1;
+        node.visible = fadeIn > 0;
+        node.children.forEach((mesh) => {
+          if (mesh.material) {
+            mesh.material.transparent = true;
+            mesh.material.opacity = fadeIn;
+          }
+        });
+
+        if (descriptor.respawnTimer <= 0) {
+          descriptor.active = true;
+          descriptor.respawnTimer = 0;
+          node.visible = true;
+          node.position.copy(descriptor.origin);
+          node.children.forEach((mesh) => {
+            if (mesh.material) mesh.material.opacity = 1;
+          });
+        }
+        return;
+      }
+
       if (node.position.distanceTo(player.position) < 1.4) {
         const type = node.userData.type;
         const gain = 1 + Math.floor(state.stats.perception / 4);
         state.resources[type] += gain;
         state.pp += 3;
-        node.position.x = (Math.random() - 0.5) * 24;
-        node.position.z = (Math.random() - 0.5) * 16;
+        descriptor.active = false;
+        descriptor.respawnTimer = descriptor.respawnDelay;
+        node.visible = false;
       }
     });
 
@@ -560,7 +643,12 @@ function tick(now) {
       droneTimer = 0;
       const yieldAmt = Math.max(1, Math.floor(state.droneLevel * 0.85));
       state.resources[state.droneTarget] += yieldAmt;
-      state.pp += 0.5 * state.droneLevel;
+      const dronePpGain = 0.5 * state.droneLevel;
+      if (state.offloadEnabled) {
+        state.offloadExp += dronePpGain;
+      } else {
+        state.pp += dronePpGain;
+      }
     }
   } else if (combat) {
     combat.fp = Math.min(combat.fpMax, combat.fp + state.stats.focusRate * 8 * dt);
@@ -581,10 +669,8 @@ function tick(now) {
     updateCombatBars();
   }
 
-  updateStepPpRate(dt, stepPpGain);
-
-  camera.position.x = THREE.MathUtils.lerp(camera.position.x, player.position.x + 18, 0.06);
-  camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z + 18, 0.06);
+  camera.position.x = THREE.MathUtils.lerp(camera.position.x, player.position.x, 0.12);
+  camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z, 0.12);
   camera.lookAt(player.position.x, 0, player.position.z);
 
   safeRenderUI();
