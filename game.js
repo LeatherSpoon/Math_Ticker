@@ -49,6 +49,7 @@ const statCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 20]
 const offloadStatCosts = Object.fromEntries(Object.keys(state.stats).map((k) => [k, 12]));
 
 let player = null;
+let drone = null;
 let ground = null;
 
 const nodes = [];
@@ -122,6 +123,84 @@ function buildCyborg() {
   g.add(armL, armR);
 
   return g;
+}
+
+function buildDrone(level = state.droneLevel) {
+  const g = new THREE.Group();
+
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.35, 14, 12),
+    new THREE.MeshStandardMaterial({
+      color: 0x9fe8ff,
+      emissive: 0x4bc2ff,
+      emissiveIntensity: 0.55,
+      roughness: 0.3,
+      metalness: 0.75,
+    })
+  );
+  core.castShadow = true;
+  g.add(core);
+
+  const halo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.65, 0.07, 10, 24),
+    new THREE.MeshStandardMaterial({
+      color: 0x8ad7ff,
+      emissive: 0x3caeff,
+      emissiveIntensity: 0.8,
+      roughness: 0.4,
+      metalness: 0.3,
+    })
+  );
+  halo.rotation.x = Math.PI / 2;
+  g.add(halo);
+
+  const attachmentRoot = new THREE.Group();
+  g.add(attachmentRoot);
+
+  g.userData = {
+    core,
+    halo,
+    attachmentRoot,
+    orbitAngle: 0,
+    gatherPulse: 0,
+    gatherCooldown: 0,
+    rescueLock: false,
+  };
+
+  setDroneVisualLevel(level);
+  return g;
+}
+
+function setDroneVisualLevel(level = state.droneLevel) {
+  if (!drone || !drone.userData?.core || !drone.userData?.halo || !drone.userData?.attachmentRoot) return;
+  const { core, halo, attachmentRoot } = drone.userData;
+
+  const clampedLevel = Math.max(1, level);
+  const baseScale = 0.82 + clampedLevel * 0.12;
+  drone.scale.setScalar(baseScale);
+
+  core.material.emissiveIntensity = 0.45 + clampedLevel * 0.16;
+  halo.material.emissiveIntensity = 0.6 + clampedLevel * 0.14;
+  halo.scale.setScalar(1 + clampedLevel * 0.05);
+
+  attachmentRoot.clear();
+  const podCount = Math.min(6, 1 + clampedLevel);
+  for (let i = 0; i < podCount; i += 1) {
+    const arm = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03, 0.03, 0.55, 8),
+      new THREE.MeshStandardMaterial({ color: 0xb9d5e3, roughness: 0.4, metalness: 0.65 })
+    );
+    const pod = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0x97ffe0, emissive: 0x32cc9c, emissiveIntensity: 0.4 })
+    );
+    const angle = (i / podCount) * Math.PI * 2;
+    arm.position.set(Math.cos(angle) * 0.62, 0, Math.sin(angle) * 0.62);
+    arm.lookAt(0, 0, 0);
+    arm.rotateX(Math.PI / 2);
+    pod.position.set(Math.cos(angle) * 0.88, (i % 2 ? 0.08 : -0.08), Math.sin(angle) * 0.88);
+    attachmentRoot.add(arm, pod);
+  }
 }
 
 function spawnNode(type, x, z, color) {
@@ -389,6 +468,10 @@ function initGame() {
   player.position.set(0, 0, 0);
   scene.add(player);
 
+  drone = buildDrone();
+  drone.position.set(1.8, 2.3, -1.5);
+  scene.add(drone);
+
   spawnNode('copper', -8, -5, 0xc17f43);
   spawnNode('timber', 7, 4, 0x5d8f3a);
   spawnNode('stone', 2, -7, 0x999999);
@@ -435,6 +518,7 @@ function wireUI() {
     if (state.pp >= cost) {
       state.pp -= cost;
       state.droneLevel += 1;
+      setDroneVisualLevel(state.droneLevel);
       renderUI();
     }
   });
@@ -628,6 +712,7 @@ function dealDamage(amount, label = 'Fight') {
 }
 
 let droneTimer = 0;
+let rescueSequence = null;
 let last = performance.now();
 
 function updateStepPpRate(dt, stepPpGain) {
@@ -746,23 +831,27 @@ function tick(now) {
         state.pp += dronePpGain;
       }
     }
+
+    updateDroneFlight(dt);
   } else if (combat) {
-    combat.fp = Math.min(combat.fpMax, combat.fp + state.stats.focusRate * 8 * dt);
-    combat.enemyCooldown -= dt;
-    if (combat.enemyCooldown <= 0) {
-      combat.enemyCooldown = 2;
-      const incoming = Math.max(1, combat.enemy.userData.attack - state.stats.defense * 0.35);
-      combat.playerHP -= incoming;
-      logCombat(`${combat.enemy.userData.name} hit for ${Math.ceil(incoming)}.`);
-      if (combat.playerHP <= 0) {
-        combat.playerHP = 1;
-        logCombat('Rescue drone extracted you to Landing Site.');
-        state.env = 'Landing Site';
-        applyEnvironmentTint();
-        closeCombat(false);
+    if (runRescueSequence(dt)) {
+      updateCombatBars();
+    } else {
+      combat.fp = Math.min(combat.fpMax, combat.fp + state.stats.focusRate * 8 * dt);
+      combat.enemyCooldown -= dt;
+      if (combat.enemyCooldown <= 0) {
+        combat.enemyCooldown = 2;
+        const incoming = Math.max(1, combat.enemy.userData.attack - state.stats.defense * 0.35);
+        combat.playerHP -= incoming;
+        logCombat(`${combat.enemy.userData.name} hit for ${Math.ceil(incoming)}.`);
+        if (combat.playerHP <= 0) {
+          combat.playerHP = 1;
+          rescueSequence = { phase: 'approach', timer: 0, lift: 0 };
+          logCombat('Distress signal sent. Rescue drone inbound...');
+        }
       }
+      updateCombatBars();
     }
-    updateCombatBars();
   }
 
   camera.position.x = THREE.MathUtils.lerp(camera.position.x, player.position.x, 0.12);
