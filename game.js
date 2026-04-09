@@ -42,6 +42,8 @@ let ground = null;
 
 const nodes = [];
 const enemies = [];
+const landmarks = {};
+const envBoundObjects = [];
 
 function stylizedMesh(geometry, color) {
   const body = new THREE.Mesh(
@@ -128,6 +130,87 @@ function spawnEnemy(name, x, z) {
   e.userData = { name, hp: 60, maxHp: 60, attack: 4 };
   scene.add(e);
   enemies.push(e);
+}
+
+function registerEnvBoundObject(object3D, visibleEnvs = ['Landing Site']) {
+  object3D.userData.visibleEnvs = visibleEnvs;
+  envBoundObjects.push(object3D);
+}
+
+function createCaveEntrance(x, z) {
+  const cave = new THREE.Group();
+
+  const shell = stylizedMesh(new THREE.CylinderGeometry(3.6, 4.6, 3.8, 16, 1, true), 0x5f6770);
+  shell.position.y = 1.9;
+  cave.add(shell);
+
+  const mouth = new THREE.Mesh(
+    new THREE.TorusGeometry(1.6, 0.35, 10, 18, Math.PI),
+    new THREE.MeshStandardMaterial({ color: 0x2f3338, roughness: 0.95, metalness: 0.02 })
+  );
+  mouth.rotation.x = Math.PI / 2;
+  mouth.position.set(0, 1.2, 1.15);
+  cave.add(mouth);
+
+  const opening = new THREE.Mesh(
+    new THREE.CircleGeometry(1.4, 16),
+    new THREE.MeshBasicMaterial({ color: 0x050505 })
+  );
+  opening.position.set(0, 1.2, 1.2);
+  cave.add(opening);
+
+  const ridge = stylizedMesh(new THREE.ConeGeometry(2.6, 3.8, 7), 0x4f5861);
+  ridge.position.set(-2.6, 1.9, -1.2);
+  cave.add(ridge);
+
+  const treeA = stylizedMesh(new THREE.ConeGeometry(0.85, 2, 8), 0x3d6c3b);
+  treeA.position.set(2.4, 1.1, -0.2);
+  cave.add(treeA);
+
+  const treeB = stylizedMesh(new THREE.ConeGeometry(0.65, 1.6, 8), 0x4d7b45);
+  treeB.position.set(3.2, 0.95, -1.1);
+  cave.add(treeB);
+
+  cave.position.set(x, 0, z);
+  cave.rotation.y = -0.4;
+  scene.add(cave);
+  return cave;
+}
+
+function createTrailRoute(start, end) {
+  const route = new THREE.Group();
+  const mid1 = new THREE.Vector3(start.x + 4, 0.06, start.z - 3);
+  const mid2 = new THREE.Vector3(end.x - 6, 0.06, end.z + 2);
+  const curve = new THREE.CatmullRomCurve3([start.clone(), mid1, mid2, end.clone()]);
+
+  const points = curve.getPoints(40);
+  const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+  const line = new THREE.Line(
+    lineGeometry,
+    new THREE.LineBasicMaterial({ color: 0xffdd73, transparent: true, opacity: 0.8 })
+  );
+  route.add(line);
+
+  for (let i = 0; i <= 9; i += 1) {
+    const t = i / 9;
+    const markerPos = curve.getPoint(t);
+    const marker = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.23, 0.31, 0.2, 8),
+      new THREE.MeshStandardMaterial({ color: 0xc39d52, emissive: 0x3b2a08, roughness: 0.85 })
+    );
+    marker.position.set(markerPos.x, 0.1, markerPos.z);
+    route.add(marker);
+  }
+
+  scene.add(route);
+  return route;
+}
+
+function updateEnvironmentBoundVisibility() {
+  envBoundObjects.forEach((obj) => {
+    const visibleEnvs = obj.userData.visibleEnvs || ['Landing Site'];
+    obj.visible = visibleEnvs.includes(state.env);
+  });
 }
 
 const keys = new Set();
@@ -274,6 +357,18 @@ function initGame() {
   spawnEnemy('Scrapper', 10, -2);
   spawnEnemy('Scrapper', -4, 8);
 
+  const spawnAnchor = new THREE.Vector3(0, 0.06, 0);
+  const cavePosition = new THREE.Vector3(22, 0.06, -11);
+  const caveEntrance = createCaveEntrance(cavePosition.x, cavePosition.z);
+  landmarks.caveEntrance = caveEntrance;
+  registerEnvBoundObject(caveEntrance, ['Landing Site', 'Verdant Maw']);
+
+  const caveTrail = createTrailRoute(spawnAnchor, cavePosition);
+  landmarks.caveTrail = caveTrail;
+  registerEnvBoundObject(caveTrail, ['Landing Site']);
+
+  updateEnvironmentBoundVisibility();
+
   game3DAvailable = true;
   degradedMode = false;
 }
@@ -289,6 +384,7 @@ function applyEnvironmentTint() {
   const [groundColor, bg] = map[state.env] || map['Landing Site'];
   ground.material.color.setHex(groundColor);
   scene.background.setHex(bg);
+  updateEnvironmentBoundVisibility();
 }
 
 function wireUI() {
