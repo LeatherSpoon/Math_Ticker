@@ -62,7 +62,42 @@ body {
 .top-right { right: 12px; top: 12px; width: 250px; }
 .bottom-left { left: 12px; bottom: 44px; width: 335px; max-height: 48%; overflow: auto; }
 .bottom-right { right: 12px; bottom: 44px; width: 295px; }
-.controls { left: 50%; bottom: 12px; transform: translateX(-50%); }
+
+.hud-menu-toggle {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  padding: 0.45rem 0.8rem;
+}
+
+.hud-menu {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 0.5rem 0.8rem;
+  min-width: 220px;
+}
+
+.hud-menu h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.hud-menu label {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0.2rem 0;
+  font-size: 0.86rem;
+}
 
 button {
   cursor: pointer;
@@ -89,6 +124,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 .hidden { display: none; }
+.hud-hidden { display: none; }
 
 .combat-frame {
   width: min(900px, 90vw);
