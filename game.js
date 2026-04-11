@@ -61,6 +61,12 @@ const nodes = [];
 const enemies = [];
 const landmarks = {};
 const envBoundObjects = [];
+let raycaster = null;
+let pointerNdc = null;
+let gatherPointerDown = false;
+let activeGatherNode = null;
+let gatherProgress = 0;
+let combatReengageCooldown = 0;
 
 function stylizedMesh(geometry, color) {
   const body = new THREE.Mesh(
@@ -209,11 +215,22 @@ function setDroneVisualLevel(level = state.droneLevel) {
 }
 
 function spawnNode(type, x, z, color) {
+  const nodeValue = {
+    copper: 1,
+    timber: 1,
+    stone: 2,
+    fiber: 2,
+    resin: 3,
+    quartz: 4,
+  };
+  const value = nodeValue[type] || 1;
   const node = stylizedMesh(new THREE.DodecahedronGeometry(0.8, 0), color);
   const origin = new THREE.Vector3(x, 0.8, z);
   node.position.copy(origin);
   node.userData = {
     type,
+    value,
+    extractDuration: 0.9 + value * 0.7,
     origin,
     active: true,
     respawnTimer: 0,
@@ -366,6 +383,47 @@ window.addEventListener('resize', () => {
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 });
 
+function setPointerFromClient(clientX, clientY) {
+  if (!pointerNdc) return;
+  const rect = canvas.getBoundingClientRect();
+  pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+}
+
+function pickNodeAtPointer() {
+  if (!camera || !scene) return null;
+  if (!raycaster || !pointerNdc) return null;
+  raycaster.setFromCamera(pointerNdc, camera);
+  const intersects = raycaster.intersectObjects(nodes, true);
+  for (const hit of intersects) {
+    let obj = hit.object;
+    while (obj && !nodes.includes(obj)) obj = obj.parent;
+    if (obj?.userData?.active) return obj;
+  }
+  return null;
+}
+
+function stopGathering() {
+  gatherProgress = 0;
+  activeGatherNode = null;
+}
+
+canvas.addEventListener('pointerdown', (event) => {
+  gatherPointerDown = true;
+  setPointerFromClient(event.clientX, event.clientY);
+  activeGatherNode = pickNodeAtPointer();
+  gatherProgress = 0;
+});
+
+canvas.addEventListener('pointermove', (event) => {
+  setPointerFromClient(event.clientX, event.clientY);
+});
+
+window.addEventListener('pointerup', () => {
+  gatherPointerDown = false;
+  stopGathering();
+});
+
 const ui = {
   pp: document.getElementById('pp'),
   ppRate: document.getElementById('ppRate'),
@@ -485,6 +543,8 @@ function safeRenderUI() {
 }
 
 function initGame() {
+  raycaster = new THREE.Raycaster();
+  pointerNdc = new THREE.Vector2();
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
@@ -645,6 +705,7 @@ function openCombat(enemy) {
 function closeCombat(victory = false) {
   state.inCombat = false;
   state.playerHP = Math.max(1, combat.playerHP);
+  combatReengageCooldown = 1.2;
   if (victory) {
     const reward = 80;
     state.pp += reward;
@@ -764,6 +825,26 @@ function dealDamage(amount, label = 'Fight') {
   updateCombatBars();
 }
 
+function runRescueSequence(dt) {
+  if (!rescueSequence || !combat || !drone) return false;
+  rescueSequence.timer += dt;
+  rescueSequence.lift = Math.min(1, rescueSequence.lift + dt * 0.6);
+  const liftHeight = 2.5 * rescueSequence.lift;
+  player.position.y = liftHeight;
+
+  const target = new THREE.Vector3(player.position.x + 0.6, 2.6 + liftHeight, player.position.z - 0.5);
+  drone.position.lerp(target, Math.min(1, dt * 2.2));
+
+  if (rescueSequence.timer >= 2.4) {
+    player.position.set(0, 0, 0);
+    state.env = 'Landing Site';
+    applyEnvironmentTint();
+    rescueSequence = null;
+    closeCombat(false);
+  }
+  return true;
+}
+
 let droneTimer = 0;
 let rescueSequence = null;
 let last = performance.now();
@@ -806,6 +887,7 @@ function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   let stepPpGain = 0;
   last = now;
+  combatReengageCooldown = Math.max(0, combatReengageCooldown - dt);
   const passivePpGain = state.ppRate * dt;
   if (state.offloadEnabled) {
     const offloadGain = passivePpGain * state.offloadRatio;
@@ -885,20 +967,39 @@ function tick(now) {
         return;
       }
 
-      if (node.position.distanceTo(player.position) < 1.4) {
-        const type = node.userData.type;
-        const gain = 1 + Math.floor(state.stats.perception / 4);
-        state.resources[type] += gain;
-        state.pp += 3;
-        descriptor.active = false;
-        descriptor.respawnTimer = descriptor.respawnDelay;
-        node.visible = false;
-      }
     });
+
+    if (!gatherPointerDown || state.inCombat) {
+      stopGathering();
+    } else {
+      if (!activeGatherNode || !activeGatherNode.userData.active) {
+        activeGatherNode = pickNodeAtPointer();
+        gatherProgress = 0;
+      }
+      if (activeGatherNode?.userData?.active) {
+        const gatherDistance = activeGatherNode.position.distanceTo(player.position);
+        if (gatherDistance > 2.2) {
+          stopGathering();
+        } else {
+          const descriptor = activeGatherNode.userData;
+          const speedBonus = 1 + state.stats.dexterity * 0.05;
+          gatherProgress += dt * speedBonus;
+          if (gatherProgress >= descriptor.extractDuration) {
+            const gain = Math.max(1, descriptor.value + Math.floor(state.stats.perception / 4));
+            state.resources[descriptor.type] += gain;
+            state.pp += 3 + descriptor.value;
+            descriptor.active = false;
+            descriptor.respawnTimer = descriptor.respawnDelay;
+            activeGatherNode.visible = false;
+            stopGathering();
+          }
+        }
+      }
+    }
 
     enemies.forEach((enemy) => {
       enemy.lookAt(player.position.x, enemy.position.y, player.position.z);
-      if (enemy.position.distanceTo(player.position) < 1.5 && !state.inCombat) {
+      if (enemy.position.distanceTo(player.position) < 1.5 && !state.inCombat && combatReengageCooldown <= 0) {
         openCombat(enemy);
       }
     });
