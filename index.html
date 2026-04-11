@@ -57,7 +57,18 @@
     <main class="layout">
       <section class="viewport-wrap">
         <canvas id="gameCanvas" aria-label="Game viewport"></canvas>
-        <div class="hud top-left">
+        <button id="hudMenuToggle" class="hud-menu-toggle" aria-expanded="false" aria-controls="hudMenu">
+          UI Menu
+        </button>
+        <div id="hudMenu" class="hud-menu hidden" role="menu" aria-label="HUD visibility menu">
+          <h3>Show Windows</h3>
+          <label><input type="checkbox" data-target-panel="statusPanel" checked /> Status</label>
+          <label><input type="checkbox" data-target-panel="environmentPanel" checked /> Environment</label>
+          <label><input type="checkbox" data-target-panel="statsPanel" checked /> Stats</label>
+          <label><input type="checkbox" data-target-panel="dronePanel" checked /> Drones & Craft</label>
+        </div>
+
+        <div id="statusPanel" class="hud top-left">
           <h1>Frontier Loop</h1>
           <p><strong>PP</strong>: <span id="pp">0</span> <span id="ppRate">(+1.0/s)</span></p>
           <p><strong>Offload XP</strong>: <span id="offloadExp">0</span> <span id="offloadStatus">(Disabled)</span></p>
@@ -68,18 +79,18 @@
           <p><strong>Resource</strong>: <span id="resourceSummary">copper 0, timber 0, stone 0</span></p>
         </div>
 
-        <div class="hud top-right">
+        <div id="environmentPanel" class="hud top-right">
           <h2>Environment</h2>
           <p id="environmentLabel">Landing Site</p>
           <div id="environmentButtons"></div>
         </div>
 
-        <div class="hud bottom-left">
+        <div id="statsPanel" class="hud bottom-left">
           <h2>Stats (Spend PP)</h2>
           <div id="statList"></div>
         </div>
 
-        <div class="hud bottom-right">
+        <div id="dronePanel" class="hud bottom-right">
           <h2>Drones & Craft</h2>
           <p>Drone Level: <span id="droneLevel">1</span></p>
           <button id="upgradeDrone">Upgrade Drone (250 PP)</button>
@@ -92,9 +103,6 @@
           <p>Inventory: <span id="inventory">ration 0, first aid 0</span></p>
         </div>
 
-        <div class="hud controls">
-          Move: WASD or Arrow Keys · Gather by touching nodes · Touch enemy to trigger combat
-        </div>
       </section>
     </main>
 

@@ -439,7 +439,27 @@ const ui = {
   envLabel: document.getElementById('environmentLabel'),
   envButtons: document.getElementById('environmentButtons'),
   droneResourceButtons: document.getElementById('droneResourceButtons'),
+  hudMenuToggle: document.getElementById('hudMenuToggle'),
+  hudMenu: document.getElementById('hudMenu'),
 };
+
+function initHudMenu() {
+  if (!ui.hudMenuToggle || !ui.hudMenu) return;
+
+  ui.hudMenuToggle.addEventListener('click', () => {
+    const isHidden = ui.hudMenu.classList.toggle('hidden');
+    ui.hudMenuToggle.setAttribute('aria-expanded', String(!isHidden));
+  });
+
+  ui.hudMenu.querySelectorAll('input[data-target-panel]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      const panelId = checkbox.getAttribute('data-target-panel');
+      const panel = panelId ? document.getElementById(panelId) : null;
+      if (!panel) return;
+      panel.classList.toggle('hud-hidden', !checkbox.checked);
+    });
+  });
+}
 
 function showBootError(message) {
   let panel = document.getElementById('bootErrorPanel');
@@ -625,6 +645,8 @@ function applyEnvironmentTint() {
 function wireUI() {
   if (wireUI.didInit) return;
   wireUI.didInit = true;
+
+  initHudMenu();
 
   document.getElementById('upgradeDrone').addEventListener('click', () => {
     const cost = state.droneLevel * 250;
